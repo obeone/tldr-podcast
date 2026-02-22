@@ -25,6 +25,8 @@ from pathlib import Path
 import click
 import coloredlogs
 from dotenv import load_dotenv
+from email import message_from_bytes
+from email.utils import parsedate_to_datetime
 
 from tldr.audio_exporter import export_audio
 from tldr.config import ConfigError, load_config
@@ -81,9 +83,6 @@ def _sort_emails_by_date(raw_emails: list[bytes]) -> list[bytes]:
     list[bytes]
         Sorted copy (ascending by send date).
     """
-    from email import message_from_bytes
-    from email.utils import parsedate_to_datetime
-
     def _key(raw: bytes):
         try:
             msg = message_from_bytes(raw)
