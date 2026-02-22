@@ -19,7 +19,7 @@ from __future__ import annotations
 import logging
 import re
 import sys
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 import click
@@ -173,7 +173,7 @@ def main(
     else:
         logger.info("Fetching unread emails via IMAP…")
         try:
-            raw_emails = fetch_unread_emails(imap_cfg)
+            raw_emails = fetch_unread_emails(imap_cfg, target_date=date.today())
         except IMAPError as exc:
             click.echo(f"[ERROR] IMAP error: {exc}", err=True)
             sys.exit(1)
