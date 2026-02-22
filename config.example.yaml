@@ -1,0 +1,39 @@
+# TLDR Newsletter to Podcast — Configuration Example
+# Copy this file to config.yaml and fill in your values.
+# Keys ending with _env reference the name of an environment variable
+# that will be read at runtime (never store secrets directly here).
+
+imap:
+  host: imap.gmail.com
+  port: 993
+  username: your@email.com
+  # Name of the environment variable holding your IMAP password
+  password_env: IMAP_PASSWORD
+  # IMAP folder to search for TLDR newsletters
+  folder: INBOX
+
+gemini:
+  # Name of the environment variable holding your Gemini API key
+  api_key_env: GEMINI_API_KEY
+  # Gemini model for dialogue generation (text)
+  text_model: gemini-2.0-flash
+  # Gemini model for TTS audio generation
+  tts_model: gemini-2.5-flash-preview-tts
+  speaker1:
+    name: Alex
+    voice: Puck
+  speaker2:
+    name: Jordan
+    voice: Charon
+
+scraping:
+  # Maximum number of articles to scrape (additional ones keep email summary)
+  max_articles: 15
+  # HTTP request timeout in seconds
+  timeout_seconds: 10
+
+output:
+  # Directory where the generated podcast file will be saved
+  directory: output
+  # Output format: mp3 or wav
+  format: mp3
