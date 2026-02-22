@@ -22,9 +22,14 @@ gemini:
   speaker1:
     name: Alex
     voice: Puck
+    personality: "enthusiastic, curious, quick to get excited about tech innovations"
   speaker2:
     name: Jordan
     voice: Charon
+    personality: "analytical, mildly skeptical, adds nuance and historical context"
+  tts_style:
+    scene: "Two friends co-hosting a casual French tech podcast in a cozy studio"
+    temperature: 1.2   # 0.0–2.0 — higher = more expressive
 
 scraping:
   # Maximum number of articles to scrape (additional ones keep email summary)

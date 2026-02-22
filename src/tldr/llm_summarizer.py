@@ -17,12 +17,18 @@ from tldr.retry import gemini_retry
 
 logger = logging.getLogger(__name__)
 
-# Maximum UTF-8 byte size for a single dialogue chunk sent to TTS
-_MAX_CHUNK_BYTES = 3800
+# Maximum UTF-8 byte size for a single dialogue chunk sent to TTS.
+# Set to 3000 to leave ~600-800 bytes of headroom for the TTS preamble
+# that tts_generator.py prepends before sending to the Gemini TTS API.
+_MAX_CHUNK_BYTES = 3000
 
 _SYSTEM_PROMPT_TEMPLATE = """\
 You are a podcast script writer. Your job is to create an engaging, \
 conversational podcast dialogue between two hosts: {speaker1} and {speaker2}.
+
+Host personalities:
+- {speaker1}: {speaker1_personality}
+- {speaker2}: {speaker2_personality}
 
 Instructions:
 - Review all the articles provided below.
@@ -31,17 +37,24 @@ Instructions:
 - Cover each selected article briefly: what it is about and why it matters.
 - Keep the tone informative but lively — like two curious friends catching up on tech news.
 - The entire dialogue MUST be written in French.
+- Reflect each host's personality in their speaking style and reactions.
+- Add inline emotional cues in parentheses within the dialogue text to guide \
+delivery (e.g., "(avec enthousiasme)", "(sceptique)", "(en accélérant)", \
+"(surpris)"). Vary them naturally according to the content.
+- Use shorter sentences for excitement, longer ones for analysis.
 
 STRICT OUTPUT FORMAT:
 - Each line must follow exactly this pattern: SpeakerName: dialogue text
 - Alternate between {speaker1} and {speaker2}.
-- Do NOT include stage directions, parenthetical notes, or blank lines between turns.
+- Emotional cues go INSIDE the dialogue text, never in the SpeakerName prefix.
+- Do NOT add blank lines between turns.
 - Do NOT add any introduction or conclusion outside of the dialogue format.
 
 Example output format:
-{speaker1}: Salut {speaker2}, prêt à plonger dans le TLDR d'aujourd'hui ?
-{speaker2}: Absolument ! Qu'est-ce qui t'a accroché en premier ?
-{speaker1}: Eh bien, il y a cet article fascinant sur ...
+{speaker1}: (avec enthousiasme) Incroyable, {speaker2} ! Google vient d'annoncer quelque chose qui change tout !
+{speaker2}: Mouais... (sceptique) on a déjà entendu ça. Qu'est-ce qui est vraiment nouveau cette fois ?
+{speaker1}: Eh bien, (en accélérant) ils ont réussi à réduire la latence de moitié !
+{speaker2}: (impressionné malgré lui) D'accord, ça c'est concret. Mais quelles sont les implications ?
 
 Articles:
 {articles}
@@ -52,9 +65,11 @@ def _build_prompt(
     articles: list,
     speaker1_name: str,
     speaker2_name: str,
+    speaker1_personality: str = "",
+    speaker2_personality: str = "",
 ) -> str:
     """
-    Build the full LLM prompt from the article list and speaker names.
+    Build the full LLM prompt from the article list, speaker names, and personalities.
 
     Parameters
     ----------
@@ -65,6 +80,10 @@ def _build_prompt(
         Display name of the first podcast host.
     speaker2_name : str
         Display name of the second podcast host.
+    speaker1_personality : str, optional
+        Short description of the first host's personality and speaking style.
+    speaker2_personality : str, optional
+        Short description of the second host's personality and speaking style.
 
     Returns
     -------
@@ -84,6 +103,8 @@ def _build_prompt(
     return _SYSTEM_PROMPT_TEMPLATE.format(
         speaker1=speaker1_name,
         speaker2=speaker2_name,
+        speaker1_personality=speaker1_personality or "enthusiastic and curious",
+        speaker2_personality=speaker2_personality or "analytical and thoughtful",
         articles=articles_text,
     )
 
@@ -109,7 +130,7 @@ def _split_dialogue_into_chunks(
     speaker2_name : str
         Name of the second speaker, used to detect turn boundaries.
     max_bytes : int, optional
-        Maximum UTF-8 byte size per chunk, by default 3800.
+        Maximum UTF-8 byte size per chunk, by default 3000.
 
     Returns
     -------
@@ -215,7 +236,9 @@ def generate_dialogue(
         ``full_text`` / ``summary`` attributes.
     gemini_cfg : dict
         Resolved Gemini configuration section from the YAML config, containing
-        at minimum ``api_key`` and ``text_model`` keys.
+        at minimum ``api_key`` and ``text_model`` keys.  Optional keys:
+        ``speaker1.personality`` and ``speaker2.personality`` strings used
+        to personalise each host's speaking style.
     speaker1_name : str
         Display name of the first podcast host (used in the prompt and as a
         speaker-turn boundary marker).
@@ -238,7 +261,16 @@ def generate_dialogue(
     >>> len(chunks) > 0
     True
     """
-    prompt = _build_prompt(articles, speaker1_name, speaker2_name)
+    speaker1_personality = gemini_cfg.get("speaker1", {}).get("personality", "")
+    speaker2_personality = gemini_cfg.get("speaker2", {}).get("personality", "")
+
+    prompt = _build_prompt(
+        articles,
+        speaker1_name,
+        speaker2_name,
+        speaker1_personality=speaker1_personality,
+        speaker2_personality=speaker2_personality,
+    )
 
     logger.info(
         "Sending %d article(s) to Gemini model '%s'.",
