@@ -8,6 +8,7 @@ and retrieves the raw RFC 822 bytes for all UNSEEN messages.
 from __future__ import annotations
 
 import logging
+from datetime import date, timedelta
 from typing import Any
 
 import coloredlogs
@@ -25,13 +26,16 @@ class IMAPError(Exception):
     """Raised when any IMAP operation fails."""
 
 
-def fetch_unread_emails(imap_cfg: dict[str, Any]) -> list[bytes]:
+def fetch_unread_emails(
+    imap_cfg: dict[str, Any],
+    target_date: date | None = None,
+) -> list[bytes]:
     """
     Connect to an IMAP server and fetch the raw bytes of all unread messages.
 
     Establishes an SSL connection using the provided configuration, logs in,
-    selects the configured folder, searches for UNSEEN messages, and fetches
-    the RFC 822 raw bytes for each one.
+    selects the configured folder, searches for UNSEEN messages sent on
+    ``target_date``, and fetches the RFC 822 raw bytes for each one.
 
     All exceptions are caught and re-raised as :exc:`IMAPError`.
 
@@ -45,6 +49,10 @@ def fetch_unread_emails(imap_cfg: dict[str, Any]) -> list[bytes]:
         - ``username`` (str): Login username / email address.
         - ``password`` (str): Login password.
         - ``folder`` (str): Mailbox folder to select (e.g. ``"INBOX"``).
+
+    target_date : date or None, optional
+        The calendar day to filter by (send date). Defaults to ``date.today()``.
+        Uses IMAP ``SENTSINCE``/``SENTBEFORE`` criteria (RFC 3501 date format).
 
     Returns
     -------
@@ -68,7 +76,15 @@ def fetch_unread_emails(imap_cfg: dict[str, Any]) -> list[bytes]:
     ...     "folder": "INBOX",
     ... }
     >>> messages = fetch_unread_emails(cfg)  # doctest: +SKIP
+    >>> from datetime import date
+    >>> messages = fetch_unread_emails(cfg, target_date=date(2026, 2, 20))  # doctest: +SKIP
     """
+    if target_date is None:
+        target_date = date.today()
+
+    since_str = target_date.strftime("%d-%b-%Y")
+    before_str = (target_date + timedelta(days=1)).strftime("%d-%b-%Y")
+
     host = imap_cfg["host"]
     port = imap_cfg["port"]
     username = imap_cfg["username"]
@@ -85,8 +101,10 @@ def fetch_unread_emails(imap_cfg: dict[str, Any]) -> list[bytes]:
             logger.debug("Selecting folder: %s", folder)
             client.select_folder(folder)
 
-            logger.debug("Searching for UNSEEN messages")
-            message_ids = client.search(["UNSEEN"])
+            logger.debug("Searching for UNSEEN messages sent on %s", since_str)
+            message_ids = client.search(
+                ["UNSEEN", "SENTSINCE", since_str, "SENTBEFORE", before_str]
+            )
             logger.info("Found %d unread message(s) in %s", len(message_ids), folder)
 
             if not message_ids:

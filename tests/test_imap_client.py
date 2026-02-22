@@ -6,6 +6,7 @@ Uses unittest.mock to patch IMAPClient so no real server is required.
 
 from __future__ import annotations
 
+from datetime import date
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -120,3 +121,37 @@ class TestFetchUnreadEmails:
         with patch("tldr.imap_client.IMAPClient", return_value=mock_client):
             with pytest.raises(IMAPError):
                 fetch_unread_emails(SAMPLE_CFG)
+
+
+class TestFetchUnreadEmailsDateFilter:
+    """Tests for the target_date filtering behaviour."""
+
+    def test_uses_sentsince_and_before_when_target_date_given(self):
+        """fetch_unread_emails passes SENTSINCE/SENTBEFORE criteria when target_date is set."""
+        raw_map = {1: {b"RFC822": RAW_EMAIL_1}}
+        mock_client = _make_mock_client([1], raw_map)
+        target = date(2026, 2, 20)
+
+        with patch("tldr.imap_client.IMAPClient", return_value=mock_client):
+            result = fetch_unread_emails(SAMPLE_CFG, target_date=target)
+
+        assert result == [RAW_EMAIL_1]
+        mock_client.search.assert_called_once_with(
+            ["UNSEEN", "SENTSINCE", "20-Feb-2026", "SENTBEFORE", "21-Feb-2026"]
+        )
+
+    def test_defaults_to_today_when_no_target_date(self):
+        """fetch_unread_emails defaults target_date to date.today()."""
+        raw_map = {1: {b"RFC822": RAW_EMAIL_1}}
+        mock_client = _make_mock_client([1], raw_map)
+        today = date(2026, 2, 22)
+
+        with patch("tldr.imap_client.IMAPClient", return_value=mock_client):
+            with patch("tldr.imap_client.date") as mock_date:
+                mock_date.today.return_value = today
+                mock_date.side_effect = lambda *a, **kw: date(*a, **kw)
+                fetch_unread_emails(SAMPLE_CFG)
+
+        mock_client.search.assert_called_once_with(
+            ["UNSEEN", "SENTSINCE", "22-Feb-2026", "SENTBEFORE", "23-Feb-2026"]
+        )
