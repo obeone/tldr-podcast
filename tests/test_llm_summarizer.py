@@ -195,3 +195,60 @@ class TestGenerateDialogue:
         assert call_kwargs.kwargs.get("model") == "gemini-2.0-flash" or (
             len(call_kwargs.args) > 0 and call_kwargs.args[0] == "gemini-2.0-flash"
         )
+
+    def test_generate_dialogue_passes_max_output_tokens(self):
+        """generate_dialogue must pass max_output_tokens=8192 to the Gemini API."""
+        mock_genai = _mock_genai_response(SHORT_DIALOGUE)
+
+        with patch("tldr.llm_summarizer.genai", mock_genai):
+            generate_dialogue(SAMPLE_ARTICLES, GEMINI_CFG, "Alex", "Jordan")
+
+        call_kwargs = mock_genai.Client.return_value.models.generate_content.call_args.kwargs
+        config_obj = call_kwargs.get("config")
+        assert config_obj is not None, "generate_content must be called with a config= kwarg"
+        assert config_obj.max_output_tokens == 8192
+
+
+class TestBuildPromptConfig:
+    """Tests that generate_dialogue injects config-driven parameters into the prompt."""
+
+    def test_prompt_includes_configured_article_range(self):
+        """Prompt must reference the min/max article counts from config."""
+        cfg = {
+            **GEMINI_CFG,
+            "dialogue": {"min_articles": 8, "max_articles": 12, "target_word_count": 1200},
+        }
+        mock_genai = _mock_genai_response(SHORT_DIALOGUE)
+
+        with patch("tldr.llm_summarizer.genai", mock_genai):
+            generate_dialogue(SAMPLE_ARTICLES, cfg, "Alex", "Jordan")
+
+        call_args = mock_genai.Client.return_value.models.generate_content.call_args
+        prompt = call_args.kwargs.get("contents") or call_args.args[1]
+        assert "8" in prompt
+        assert "12" in prompt
+
+    def test_prompt_includes_target_word_count(self):
+        """Prompt must include the target_word_count value."""
+        cfg = {
+            **GEMINI_CFG,
+            "dialogue": {"min_articles": 8, "max_articles": 12, "target_word_count": 1200},
+        }
+        mock_genai = _mock_genai_response(SHORT_DIALOGUE)
+
+        with patch("tldr.llm_summarizer.genai", mock_genai):
+            generate_dialogue(SAMPLE_ARTICLES, cfg, "Alex", "Jordan")
+
+        call_args = mock_genai.Client.return_value.models.generate_content.call_args
+        prompt = call_args.kwargs.get("contents") or call_args.args[1]
+        assert "1200" in prompt or "1 200" in prompt
+
+    def test_prompt_uses_defaults_when_dialogue_key_absent(self):
+        """When 'dialogue' key is absent from config, prompt uses sensible defaults."""
+        mock_genai = _mock_genai_response(SHORT_DIALOGUE)
+
+        with patch("tldr.llm_summarizer.genai", mock_genai):
+            # GEMINI_CFG has no 'dialogue' key — must not raise
+            chunks = generate_dialogue(SAMPLE_ARTICLES, GEMINI_CFG, "Alex", "Jordan")
+
+        assert len(chunks) > 0

@@ -12,6 +12,7 @@ import logging
 from dataclasses import dataclass
 
 from google import genai
+from google.genai import types
 
 from tldr.retry import gemini_retry
 
@@ -32,15 +33,18 @@ Host personalities:
 
 Instructions:
 - Review all the articles provided below.
-- Select the 5 to 8 most interesting or significant articles.
-- Discuss them in a natural, conversational style between {speaker1} and {speaker2}.
-- Cover each selected article briefly: what it is about and why it matters.
-- Keep the tone informative but lively — like two curious friends catching up on tech news.
+- Select the {min_articles} to {max_articles} most interesting or significant articles.
+- Discuss each selected article in depth: explain what it is about, why it matters, \
+and explore its implications or connections to broader trends. \
+Aim for 3 to 5 exchanges per article.
 - The entire dialogue MUST be written in French.
+- The total dialogue must be at least {target_word_count} words.
+- Keep the tone informative but lively — like two curious friends catching up on tech news.
 - Reflect each host's personality in their speaking style and reactions.
 - Add inline emotional cues in parentheses within the dialogue text to guide \
-delivery (e.g., "(avec enthousiasme)", "(sceptique)", "(en accélérant)", \
-"(surpris)"). Vary them naturally according to the content.
+delivery (e.g., "(avec enthousiasme)", "(sceptique)", "(posément)", \
+"(en pesant ses mots)", "(après une courte pause)"). Vary them naturally \
+according to the content and pace of the discussion.
 - Use shorter sentences for excitement, longer ones for analysis.
 
 STRICT OUTPUT FORMAT:
@@ -67,6 +71,9 @@ def _build_prompt(
     speaker2_name: str,
     speaker1_personality: str = "",
     speaker2_personality: str = "",
+    min_articles: int = 8,
+    max_articles: int = 12,
+    target_word_count: int = 1200,
 ) -> str:
     """
     Build the full LLM prompt from the article list, speaker names, and personalities.
@@ -84,6 +91,12 @@ def _build_prompt(
         Short description of the first host's personality and speaking style.
     speaker2_personality : str, optional
         Short description of the second host's personality and speaking style.
+    min_articles : int, optional
+        Minimum number of articles the LLM must cover, by default 8.
+    max_articles : int, optional
+        Maximum number of articles the LLM may cover, by default 12.
+    target_word_count : int, optional
+        Minimum total word count for the generated dialogue, by default 1200.
 
     Returns
     -------
@@ -105,6 +118,9 @@ def _build_prompt(
         speaker2=speaker2_name,
         speaker1_personality=speaker1_personality or "enthusiastic and curious",
         speaker2_personality=speaker2_personality or "analytical and thoughtful",
+        min_articles=min_articles,
+        max_articles=max_articles,
+        target_word_count=target_word_count,
         articles=articles_text,
     )
 
@@ -264,12 +280,20 @@ def generate_dialogue(
     speaker1_personality = gemini_cfg.get("speaker1", {}).get("personality", "")
     speaker2_personality = gemini_cfg.get("speaker2", {}).get("personality", "")
 
+    dialogue_cfg = gemini_cfg.get("dialogue", {})
+    min_articles = dialogue_cfg.get("min_articles", 8)
+    max_articles = dialogue_cfg.get("max_articles", 12)
+    target_word_count = dialogue_cfg.get("target_word_count", 1200)
+
     prompt = _build_prompt(
         articles,
         speaker1_name,
         speaker2_name,
         speaker1_personality=speaker1_personality,
         speaker2_personality=speaker2_personality,
+        min_articles=min_articles,
+        max_articles=max_articles,
+        target_word_count=target_word_count,
     )
 
     logger.info(
@@ -286,6 +310,9 @@ def generate_dialogue(
         response = client.models.generate_content(
             model=gemini_cfg["text_model"],
             contents=prompt,
+            config=types.GenerateContentConfig(
+                max_output_tokens=8192,
+            ),
         )
         return response.text
 
