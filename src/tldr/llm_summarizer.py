@@ -28,6 +28,7 @@ Instructions:
 - Discuss them in a natural, conversational style between {speaker1} and {speaker2}.
 - Cover each selected article briefly: what it is about and why it matters.
 - Keep the tone informative but lively — like two curious friends catching up on tech news.
+- The entire dialogue MUST be written in French.
 
 STRICT OUTPUT FORMAT:
 - Each line must follow exactly this pattern: SpeakerName: dialogue text
@@ -36,9 +37,9 @@ STRICT OUTPUT FORMAT:
 - Do NOT add any introduction or conclusion outside of the dialogue format.
 
 Example output format:
-{speaker1}: Hey {speaker2}, ready to dive into today's TLDR?
-{speaker2}: Absolutely! What caught your eye first?
-{speaker1}: Well, there's this fascinating piece about ...
+{speaker1}: Salut {speaker2}, prêt à plonger dans le TLDR d'aujourd'hui ?
+{speaker2}: Absolument ! Qu'est-ce qui t'a accroché en premier ?
+{speaker1}: Eh bien, il y a cet article fascinant sur ...
 
 Articles:
 {articles}
