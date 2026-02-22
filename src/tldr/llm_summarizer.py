@@ -13,6 +13,8 @@ from dataclasses import dataclass
 
 from google import genai
 
+from tldr.retry import gemini_retry
+
 logger = logging.getLogger(__name__)
 
 # Maximum UTF-8 byte size for a single dialogue chunk sent to TTS
@@ -246,11 +248,16 @@ def generate_dialogue(
     logger.debug("Prompt length: %d chars.", len(prompt))
 
     client = genai.Client(api_key=gemini_cfg["api_key"])
-    response = client.models.generate_content(
-        model=gemini_cfg["text_model"],
-        contents=prompt,
-    )
-    dialogue_text = response.text
+
+    @gemini_retry
+    def _call_api() -> str:
+        response = client.models.generate_content(
+            model=gemini_cfg["text_model"],
+            contents=prompt,
+        )
+        return response.text
+
+    dialogue_text = _call_api()
 
     if not dialogue_text:
         raise RuntimeError("Gemini returned an empty dialogue response.")

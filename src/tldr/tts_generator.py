@@ -15,6 +15,8 @@ import coloredlogs
 from google import genai
 from google.genai import types
 
+from tldr.retry import gemini_retry
+
 if TYPE_CHECKING:
     from tldr.llm_summarizer import DialogueChunk
 
@@ -94,25 +96,26 @@ def generate_audio_chunks(
             len(chunk.text.encode("utf-8")),
         )
 
-        response = client.models.generate_content(
-            model=gemini_cfg["tts_model"],
-            contents=chunk.text,
-            config=types.GenerateContentConfig(
-                response_modalities=["AUDIO"],
-                speech_config=types.SpeechConfig(
-                    multi_speaker_voice_config=voice_config,
+        @gemini_retry
+        def _call_tts() -> bytes:
+            response = client.models.generate_content(
+                model=gemini_cfg["tts_model"],
+                contents=chunk.text,
+                config=types.GenerateContentConfig(
+                    response_modalities=["AUDIO"],
+                    speech_config=types.SpeechConfig(
+                        multi_speaker_voice_config=voice_config,
+                    ),
                 ),
-            ),
-        )
-
-        try:
-            pcm_bytes: bytes = (
-                response.candidates[0].content.parts[0].inline_data.data
             )
-        except (IndexError, AttributeError) as exc:
-            raise RuntimeError(
-                f"Unexpected TTS response structure for chunk {chunk.index}: {exc}"
-            ) from exc
+            try:
+                return response.candidates[0].content.parts[0].inline_data.data
+            except (IndexError, AttributeError) as exc:
+                raise RuntimeError(
+                    f"Unexpected TTS response structure for chunk {chunk.index}: {exc}"
+                ) from exc
+
+        pcm_bytes: bytes = _call_tts()
 
         logger.info(
             "Chunk %d: received %d bytes of PCM audio",
