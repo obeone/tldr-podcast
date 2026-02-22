@@ -43,8 +43,10 @@ def _build_tts_prompt(chunk_text: str, gemini_cfg: dict) -> str:
         The raw dialogue text for this chunk (e.g. "Alex: (avec enthousiasme) ...").
     gemini_cfg : dict
         Resolved Gemini configuration section.  Uses ``speaker1``, ``speaker2``
-        (each with ``name`` and optional ``personality`` keys) and an optional
-        ``tts_style.scene`` string.
+        (each with ``name`` and optional ``personality`` keys), an optional
+        ``tts_style.scene`` string, and an optional ``tts_style.pace`` string
+        that provides a natural-language description of the desired speaking pace
+        (e.g. ``"slow and deliberate"``).  When absent, defaults to ``"natural"``.
 
     Returns
     -------
@@ -53,7 +55,9 @@ def _build_tts_prompt(chunk_text: str, gemini_cfg: dict) -> str:
     """
     s1 = gemini_cfg["speaker1"]
     s2 = gemini_cfg["speaker2"]
-    scene = gemini_cfg.get("tts_style", {}).get("scene", "")
+    tts_style = gemini_cfg.get("tts_style", {})
+    scene = tts_style.get("scene", "")
+    pace = tts_style.get("pace", "natural")
 
     s1_personality = s1.get("personality", "enthusiastic and curious")
     s2_personality = s2.get("personality", "analytical and thoughtful")
@@ -66,8 +70,9 @@ def _build_tts_prompt(chunk_text: str, gemini_cfg: dict) -> str:
     if scene:
         preamble += f"Scene: {scene}\n"
     preamble += (
-        "Director's notes: Natural conversational pace, genuine reactions, "
-        "honour any emotional cues written in parentheses in the dialogue.\n\n"
+        f"Director's notes: Conversational pace — {pace}; speak clearly, "
+        "allow a natural beat between sentences so the listener can absorb each idea. "
+        "Genuine reactions, honour any emotional cues written in parentheses in the dialogue.\n\n"
     )
     return preamble + chunk_text
 

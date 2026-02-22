@@ -128,3 +128,35 @@ class TestGenerateAudioChunks:
 
         call_kwargs = mock_client.models.generate_content.call_args
         assert call_kwargs.kwargs["model"] == FAKE_CFG["tts_model"]
+
+
+class TestBuildTtsPromptPace:
+    """Tests for _build_tts_prompt pace configuration."""
+
+    def test_configured_pace_appears_in_preamble(self):
+        """When tts_style.pace is set, it must appear in the preamble."""
+        from tldr.tts_generator import _build_tts_prompt
+
+        cfg = {
+            **FAKE_CFG,
+            "tts_style": {"pace": "slow and deliberate"},
+        }
+        result = _build_tts_prompt("Alex: Hello!", cfg)
+        assert "slow and deliberate" in result
+
+    def test_default_pace_used_when_not_configured(self):
+        """When tts_style.pace is absent, a sensible default pace is still present."""
+        from tldr.tts_generator import _build_tts_prompt
+
+        result = _build_tts_prompt("Alex: Hello!", FAKE_CFG)
+        # Must still contain a pace instruction of some kind
+        assert "pace" in result.lower()
+
+    def test_preamble_precedes_dialogue(self):
+        """The dialogue text must appear after the preamble in the output."""
+        from tldr.tts_generator import _build_tts_prompt
+
+        cfg = {**FAKE_CFG, "tts_style": {"pace": "slow and deliberate"}}
+        dialogue = "Alex: Bonjour tout le monde!"
+        result = _build_tts_prompt(dialogue, cfg)
+        assert result.index("slow and deliberate") < result.index(dialogue)
