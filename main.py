@@ -17,13 +17,16 @@ Options
 from __future__ import annotations
 
 import logging
+import re
 import sys
-from datetime import datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 import click
 import coloredlogs
 from dotenv import load_dotenv
+from email import message_from_bytes
+from email.utils import parsedate_to_datetime
 
 from tldr.audio_exporter import export_audio
 from tldr.config import ConfigError, load_config
@@ -34,6 +37,60 @@ from tldr.tts_generator import generate_audio_chunks
 from tldr.web_scraper import scrape_articles
 
 logger = logging.getLogger(__name__)
+
+
+def _dedup_articles(articles: list) -> list:
+    """
+    Return a copy of *articles* with duplicates removed.
+
+    Two articles are considered identical when their titles match after
+    lowercasing and collapsing runs of whitespace to a single space.
+    The first occurrence is kept; subsequent duplicates are dropped.
+
+    Parameters
+    ----------
+    articles : list[Article]
+        Ordered list of articles, possibly containing duplicates.
+
+    Returns
+    -------
+    list[Article]
+        Deduplicated list preserving the original order of first occurrences.
+    """
+    seen: set[str] = set()
+    result = []
+    for article in articles:
+        key = re.sub(r"\s+", " ", article.title.lower().strip())
+        if key not in seen:
+            seen.add(key)
+            result.append(article)
+    return result
+
+
+def _sort_emails_by_date(raw_emails: list[bytes]) -> list[bytes]:
+    """
+    Return *raw_emails* sorted ascending by their ``Date:`` header.
+
+    Emails whose ``Date:`` header cannot be parsed are placed last.
+
+    Parameters
+    ----------
+    raw_emails : list[bytes]
+        Raw RFC 822 email bytes.
+
+    Returns
+    -------
+    list[bytes]
+        Sorted copy (ascending by send date).
+    """
+    def _key(raw: bytes):
+        try:
+            msg = message_from_bytes(raw)
+            return parsedate_to_datetime(msg["Date"])
+        except Exception:
+            return datetime.max.replace(tzinfo=timezone.utc)
+
+    return sorted(raw_emails, key=_key)
 
 
 def _setup_logging(verbose: bool) -> None:
@@ -78,7 +135,7 @@ def main(
     dry_run: bool,
     verbose: bool,
 ) -> None:
-    """Convert a TLDR newsletter email into a two-voice podcast MP3."""
+    """Convert today's TLDR newsletter emails into a single two-voice podcast MP3."""
     load_dotenv()
     _setup_logging(verbose)
 
@@ -115,57 +172,71 @@ def main(
     else:
         logger.info("Fetching unread emails via IMAP…")
         try:
-            raw_emails = fetch_unread_emails(imap_cfg)
+            raw_emails = fetch_unread_emails(imap_cfg, target_date=date.today())
         except IMAPError as exc:
             click.echo(f"[ERROR] IMAP error: {exc}", err=True)
             sys.exit(1)
 
         if not raw_emails:
-            click.echo("No unread TLDR emails found. Nothing to do.")
+            click.echo("No unread TLDR emails found for today. Nothing to do.")
             sys.exit(0)
 
     # ------------------------------------------------------------------
-    # 3. Parse + scrape + generate dialogue for each email
+    # 3. Parse all emails → merge → deduplicate
     # ------------------------------------------------------------------
-    for i, raw in enumerate(raw_emails, start=1):
-        logger.info("Processing email %d/%d…", i, len(raw_emails))
+    raw_emails = _sort_emails_by_date(raw_emails)
+    all_articles: list = []
 
+    for i, raw in enumerate(raw_emails, start=1):
+        logger.info("Parsing email %d/%d…", i, len(raw_emails))
         try:
             articles = parse_emails(raw)
         except ParseError as exc:
             click.echo(f"[ERROR] Failed to parse email {i}: {exc}", err=True)
             continue
+        logger.info("Email %d: %d article(s) extracted.", i, len(articles))
+        all_articles.extend(articles)
 
-        if not articles:
-            logger.warning("No articles extracted from email %d — skipping.", i)
-            continue
+    if not all_articles:
+        click.echo("No articles extracted from today's emails. Nothing to do.")
+        sys.exit(0)
 
-        logger.info("%d articles extracted. Scraping full text…", len(articles))
-        scrape_articles(articles, timeout=scrape_timeout, max_articles=max_articles)
+    before_dedup = len(all_articles)
+    all_articles = _dedup_articles(all_articles)
+    removed = before_dedup - len(all_articles)
+    if removed:
+        logger.info("Deduplication removed %d duplicate article(s).", removed)
+    logger.info("%d unique article(s) ready for processing.", len(all_articles))
 
-        logger.info("Generating dialogue via Gemini…")
-        chunks = generate_dialogue(articles, gemini_cfg, speaker1_name, speaker2_name)
+    # ------------------------------------------------------------------
+    # 4. Scrape + generate dialogue
+    # ------------------------------------------------------------------
+    logger.info("Scraping full text…")
+    scrape_articles(all_articles, timeout=scrape_timeout, max_articles=max_articles)
 
-        if dry_run:
-            click.echo(f"\n=== Email {i}: Dialogue Preview ===\n")
-            for chunk in chunks:
-                click.echo(chunk.text)
-                click.echo()
-            continue
+    logger.info("Generating dialogue via Gemini…")
+    chunks = generate_dialogue(all_articles, gemini_cfg, speaker1_name, speaker2_name)
 
-        # --------------------------------------------------------------
-        # 4. TTS → audio export
-        # --------------------------------------------------------------
-        logger.info("Generating TTS audio for %d chunk(s)…", len(chunks))
-        pcm_chunks = generate_audio_chunks(chunks, gemini_cfg)
+    if dry_run:
+        click.echo("\n=== Daily Dialogue Preview ===\n")
+        for chunk in chunks:
+            click.echo(chunk.text)
+            click.echo()
+        sys.exit(0)
 
-        timestamp = datetime.now().strftime("%Y-%m-%d_%H%M")
-        filename = f"tldr_{timestamp}.{output_fmt}"
-        out_path = Path(output_dir) / filename
+    # ------------------------------------------------------------------
+    # 5. TTS → audio export
+    # ------------------------------------------------------------------
+    logger.info("Generating TTS audio for %d chunk(s)…", len(chunks))
+    pcm_chunks = generate_audio_chunks(chunks, gemini_cfg)
 
-        logger.info("Exporting audio to %s…", out_path)
-        saved = export_audio(pcm_chunks, out_path, fmt=output_fmt)
-        click.echo(f"Podcast saved to: {saved}")
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H%M")
+    filename = f"tldr_{timestamp}.{output_fmt}"
+    out_path = Path(output_dir) / filename
+
+    logger.info("Exporting audio to %s…", out_path)
+    saved = export_audio(pcm_chunks, out_path, fmt=output_fmt)
+    click.echo(f"Podcast saved to: {saved}")
 
 
 if __name__ == "__main__":
