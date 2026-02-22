@@ -27,7 +27,12 @@ gemini:
     name: Jordan
     voice: Charon
     personality: "analytical, mildly skeptical, adds nuance and historical context"
+  dialogue:
+    min_articles: 8      # minimum articles to cover (default: 8)
+    max_articles: 12     # maximum articles to cover (default: 12)
+    target_word_count: 1200  # minimum word count for the full dialogue
   tts_style:
+    pace: "slow and deliberate"   # natural-language pace for TTS preamble
     scene: "Two friends co-hosting a casual French tech podcast in a cozy studio"
     temperature: 1.2   # 0.0–2.0 — higher = more expressive
 
