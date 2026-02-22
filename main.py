@@ -17,6 +17,7 @@ Options
 from __future__ import annotations
 
 import logging
+import re
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -34,6 +35,34 @@ from tldr.tts_generator import generate_audio_chunks
 from tldr.web_scraper import scrape_articles
 
 logger = logging.getLogger(__name__)
+
+
+def _dedup_articles(articles: list) -> list:
+    """
+    Return a copy of *articles* with duplicates removed.
+
+    Two articles are considered identical when their titles match after
+    lowercasing and collapsing runs of whitespace to a single space.
+    The first occurrence is kept; subsequent duplicates are dropped.
+
+    Parameters
+    ----------
+    articles : list[Article]
+        Ordered list of articles, possibly containing duplicates.
+
+    Returns
+    -------
+    list[Article]
+        Deduplicated list preserving the original order of first occurrences.
+    """
+    seen: set[str] = set()
+    result = []
+    for article in articles:
+        key = re.sub(r"\s+", " ", article.title.lower().strip())
+        if key not in seen:
+            seen.add(key)
+            result.append(article)
+    return result
 
 
 def _setup_logging(verbose: bool) -> None:
