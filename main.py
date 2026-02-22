@@ -136,7 +136,7 @@ def main(
     dry_run: bool,
     verbose: bool,
 ) -> None:
-    """Convert a TLDR newsletter email into a two-voice podcast MP3."""
+    """Convert today's TLDR newsletter emails into a single two-voice podcast MP3."""
     load_dotenv()
     _setup_logging(verbose)
 
@@ -179,7 +179,7 @@ def main(
             sys.exit(1)
 
         if not raw_emails:
-            click.echo("No unread TLDR emails found. Nothing to do.")
+            click.echo("No unread TLDR emails found for today. Nothing to do.")
             sys.exit(0)
 
     # ------------------------------------------------------------------
