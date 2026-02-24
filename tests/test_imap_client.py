@@ -11,7 +11,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from tldr.imap_client import IMAPError, fetch_unread_emails
+from tldr.imap_client import IMAPError, fetch_unread_emails, move_emails_to_folder
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -57,15 +57,45 @@ def _make_mock_client(message_ids: list[int], raw_map: dict) -> MagicMock:
     return mock_client
 
 
+def _make_move_mock_client(
+    existing_folders: list[str],
+    capabilities: list[bytes],
+) -> MagicMock:
+    """
+    Build a mock IMAPClient for move_emails_to_folder tests.
+
+    Parameters
+    ----------
+    existing_folders : list[str]
+        Folder names to return from ``list_folders()``.
+    capabilities : list[bytes]
+        Server capabilities (e.g. ``[b"MOVE"]``).
+
+    Returns
+    -------
+    MagicMock
+        Configured mock.
+    """
+    mock_client = MagicMock()
+    mock_client.__enter__ = MagicMock(return_value=mock_client)
+    mock_client.__exit__ = MagicMock(return_value=False)
+    # list_folders returns a list of (flags, delimiter, name) tuples.
+    mock_client.list_folders.return_value = [
+        ([], b"/", name) for name in existing_folders
+    ]
+    mock_client.capabilities.return_value = capabilities
+    return mock_client
+
+
 # ---------------------------------------------------------------------------
-# Tests
+# Tests — fetch_unread_emails
 # ---------------------------------------------------------------------------
 
 class TestFetchUnreadEmails:
     """Test suite for fetch_unread_emails."""
 
-    def test_returns_raw_bytes_for_each_unread_message(self):
-        """fetch_unread_emails returns one bytes entry per unread message."""
+    def test_returns_id_and_raw_bytes_for_each_unread_message(self):
+        """fetch_unread_emails returns (id, bytes) pairs for each unread message."""
         raw_map = {
             1: {b"RFC822": RAW_EMAIL_1},
             2: {b"RFC822": RAW_EMAIL_2},
@@ -77,8 +107,12 @@ class TestFetchUnreadEmails:
 
         assert isinstance(result, list)
         assert len(result) == 2
-        assert RAW_EMAIL_1 in result
-        assert RAW_EMAIL_2 in result
+        ids = [msg_id for msg_id, _ in result]
+        raws = [raw for _, raw in result]
+        assert 1 in ids
+        assert 2 in ids
+        assert RAW_EMAIL_1 in raws
+        assert RAW_EMAIL_2 in raws
 
     def test_returns_empty_list_when_no_unread_messages(self):
         """fetch_unread_emails returns [] when the folder contains no UNSEEN messages."""
@@ -135,7 +169,7 @@ class TestFetchUnreadEmailsDateFilter:
         with patch("tldr.imap_client.IMAPClient", return_value=mock_client):
             result = fetch_unread_emails(SAMPLE_CFG, target_date=target)
 
-        assert result == [RAW_EMAIL_1]
+        assert result == [(1, RAW_EMAIL_1)]
         mock_client.search.assert_called_once_with(
             ["UNSEEN", "SENTSINCE", "20-Feb-2026", "SENTBEFORE", "21-Feb-2026"]
         )
@@ -155,3 +189,79 @@ class TestFetchUnreadEmailsDateFilter:
         mock_client.search.assert_called_once_with(
             ["UNSEEN", "SENTSINCE", "22-Feb-2026", "SENTBEFORE", "23-Feb-2026"]
         )
+
+
+# ---------------------------------------------------------------------------
+# Tests — move_emails_to_folder
+# ---------------------------------------------------------------------------
+
+class TestMoveEmailsToFolder:
+    """Test suite for move_emails_to_folder."""
+
+    def test_uses_move_command_when_server_supports_it(self):
+        """move_emails_to_folder uses the MOVE command when the server advertises it."""
+        mock_client = _make_move_mock_client(["INBOX", "TLDR/Seen"], [b"MOVE"])
+
+        with patch("tldr.imap_client.IMAPClient", return_value=mock_client):
+            move_emails_to_folder(SAMPLE_CFG, [1, 2], "TLDR/Seen")
+
+        mock_client.move.assert_called_once_with([1, 2], "TLDR/Seen")
+        mock_client.copy.assert_not_called()
+        mock_client.delete_messages.assert_not_called()
+
+    def test_falls_back_to_copy_delete_expunge_without_move_extension(self):
+        """move_emails_to_folder falls back to COPY+DELETE+EXPUNGE when no MOVE support."""
+        mock_client = _make_move_mock_client(["INBOX", "TLDR/Seen"], [b"IMAP4rev1"])
+
+        with patch("tldr.imap_client.IMAPClient", return_value=mock_client):
+            move_emails_to_folder(SAMPLE_CFG, [1, 2], "TLDR/Seen")
+
+        mock_client.copy.assert_called_once_with([1, 2], "TLDR/Seen")
+        mock_client.delete_messages.assert_called_once_with([1, 2])
+        mock_client.expunge.assert_called_once()
+        mock_client.move.assert_not_called()
+
+    def test_creates_target_folder_if_missing(self):
+        """move_emails_to_folder creates and subscribes the target folder when absent."""
+        mock_client = _make_move_mock_client(["INBOX"], [b"MOVE"])
+
+        with patch("tldr.imap_client.IMAPClient", return_value=mock_client):
+            move_emails_to_folder(SAMPLE_CFG, [1], "TLDR/Seen")
+
+        mock_client.create_folder.assert_called_once_with("TLDR/Seen")
+        mock_client.subscribe_folder.assert_called_once_with("TLDR/Seen")
+
+    def test_does_not_create_folder_when_it_already_exists(self):
+        """move_emails_to_folder skips folder creation when the target already exists."""
+        mock_client = _make_move_mock_client(["INBOX", "TLDR/Seen"], [b"MOVE"])
+
+        with patch("tldr.imap_client.IMAPClient", return_value=mock_client):
+            move_emails_to_folder(SAMPLE_CFG, [1], "TLDR/Seen")
+
+        mock_client.create_folder.assert_not_called()
+        mock_client.subscribe_folder.assert_not_called()
+
+    def test_does_nothing_when_message_ids_is_empty(self):
+        """move_emails_to_folder skips all IMAP calls when message_ids is empty."""
+        with patch("tldr.imap_client.IMAPClient") as mock_cls:
+            move_emails_to_folder(SAMPLE_CFG, [], "TLDR/Seen")
+
+        mock_cls.assert_not_called()
+
+    def test_raises_imap_error_on_connection_failure(self):
+        """move_emails_to_folder raises IMAPError when the connection fails."""
+        with patch(
+            "tldr.imap_client.IMAPClient",
+            side_effect=ConnectionRefusedError("refused"),
+        ):
+            with pytest.raises(IMAPError):
+                move_emails_to_folder(SAMPLE_CFG, [1], "TLDR/Seen")
+
+    def test_raises_imap_error_on_move_failure(self):
+        """move_emails_to_folder raises IMAPError when the MOVE command fails."""
+        mock_client = _make_move_mock_client(["INBOX", "TLDR/Seen"], [b"MOVE"])
+        mock_client.move.side_effect = Exception("MOVE failed")
+
+        with patch("tldr.imap_client.IMAPClient", return_value=mock_client):
+            with pytest.raises(IMAPError):
+                move_emails_to_folder(SAMPLE_CFG, [1], "TLDR/Seen")
