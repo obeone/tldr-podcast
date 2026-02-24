@@ -11,6 +11,9 @@ imap:
   password_env: IMAP_PASSWORD
   # IMAP folder to search for TLDR newsletters
   folder: INBOX
+  # Folder where processed emails are moved after a successful podcast export.
+  # The folder is created automatically if it does not exist.
+  seen_folder: TLDR/Seen
 
 gemini:
   # Name of the environment variable holding your Gemini API key
