@@ -31,7 +31,7 @@ from email.utils import parsedate_to_datetime
 from tldr.audio_exporter import export_audio
 from tldr.config import ConfigError, load_config
 from tldr.email_parser import ParseError, parse_emails
-from tldr.imap_client import IMAPError, fetch_unread_emails
+from tldr.imap_client import IMAPError, fetch_unread_emails, move_emails_to_folder
 from tldr.llm_summarizer import generate_dialogue
 from tldr.tts_generator import generate_audio_chunks
 from tldr.web_scraper import scrape_articles
@@ -67,30 +67,34 @@ def _dedup_articles(articles: list) -> list:
     return result
 
 
-def _sort_emails_by_date(raw_emails: list[bytes]) -> list[bytes]:
+def _sort_emails_by_date(
+    email_data: list[tuple[int, bytes]],
+) -> list[tuple[int, bytes]]:
     """
-    Return *raw_emails* sorted ascending by their ``Date:`` header.
+    Return *email_data* sorted ascending by the ``Date:`` header of each message.
 
-    Emails whose ``Date:`` header cannot be parsed are placed last.
+    Entries whose ``Date:`` header cannot be parsed are placed last.
 
     Parameters
     ----------
-    raw_emails : list[bytes]
-        Raw RFC 822 email bytes.
+    email_data : list[tuple[int, bytes]]
+        List of ``(message_id, raw_bytes)`` pairs as returned by
+        :func:`~tldr.imap_client.fetch_unread_emails`.
 
     Returns
     -------
-    list[bytes]
+    list[tuple[int, bytes]]
         Sorted copy (ascending by send date).
     """
-    def _key(raw: bytes):
+    def _key(item: tuple[int, bytes]):
+        _, raw = item
         try:
             msg = message_from_bytes(raw)
             return parsedate_to_datetime(msg["Date"])
         except Exception:
             return datetime.max.replace(tzinfo=timezone.utc)
 
-    return sorted(raw_emails, key=_key)
+    return sorted(email_data, key=_key)
 
 
 def _setup_logging(verbose: bool) -> None:
@@ -161,33 +165,41 @@ def main(
     speaker1_name: str = gemini_cfg.get("speaker1", {}).get("name", "Alex")
     speaker2_name: str = gemini_cfg.get("speaker2", {}).get("name", "Jordan")
 
+    seen_folder: str = imap_cfg.get("seen_folder", "TLDR/Seen")
+
     # ------------------------------------------------------------------
     # 2. Fetch email(s)
     # ------------------------------------------------------------------
-    raw_emails: list[bytes] = []
+    # imap_message_ids holds the server-side IDs needed to move messages later.
+    # It remains empty when a local .eml file is used (no IMAP involved).
+    imap_message_ids: list[int] = []
+    email_data: list[tuple[int, bytes]] = []
 
     if eml_path:
         logger.info("Reading local .eml file: %s", eml_path)
-        raw_emails = [Path(eml_path).read_bytes()]
+        # Assign a placeholder ID of 0 — it is never used for moving.
+        email_data = [(0, Path(eml_path).read_bytes())]
     else:
         logger.info("Fetching unread emails via IMAP…")
         try:
-            raw_emails = fetch_unread_emails(imap_cfg, target_date=date.today())
+            email_data = fetch_unread_emails(imap_cfg, target_date=date.today())
         except IMAPError as exc:
             click.echo(f"[ERROR] IMAP error: {exc}", err=True)
             sys.exit(1)
 
-        if not raw_emails:
+        if not email_data:
             click.echo("No unread TLDR emails found for today. Nothing to do.")
             sys.exit(0)
+
+        imap_message_ids = [msg_id for msg_id, _ in email_data]
 
     # ------------------------------------------------------------------
     # 3. Parse all emails → merge → deduplicate
     # ------------------------------------------------------------------
-    raw_emails = _sort_emails_by_date(raw_emails)
+    email_data = _sort_emails_by_date(email_data)
     all_articles: list = []
 
-    for i, raw in enumerate(raw_emails, start=1):
+    for i, (_, raw) in enumerate(email_data, start=1):
         logger.info("Parsing email %d/%d…", i, len(raw_emails))
         try:
             articles = parse_emails(raw)
@@ -237,6 +249,25 @@ def main(
     logger.info("Exporting audio to %s…", out_path)
     saved = export_audio(pcm_chunks, out_path, fmt=output_fmt)
     click.echo(f"Podcast saved to: {saved}")
+
+    # ------------------------------------------------------------------
+    # 6. Move processed emails to the "seen" folder
+    # ------------------------------------------------------------------
+    if imap_message_ids:
+        logger.info(
+            "Moving %d processed email(s) to %s…",
+            len(imap_message_ids),
+            seen_folder,
+        )
+        try:
+            move_emails_to_folder(imap_cfg, imap_message_ids, seen_folder)
+            logger.info("Emails moved to %s.", seen_folder)
+        except IMAPError as exc:
+            logger.warning(
+                "Could not move emails to %s: %s — continuing anyway.",
+                seen_folder,
+                exc,
+            )
 
 
 if __name__ == "__main__":
