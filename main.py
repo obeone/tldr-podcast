@@ -200,7 +200,7 @@ def main(
     all_articles: list = []
 
     for i, (_, raw) in enumerate(email_data, start=1):
-        logger.info("Parsing email %d/%d…", i, len(raw_emails))
+        logger.info("Parsing email %d/%d…", i, len(email_data))
         try:
             articles = parse_emails(raw)
         except ParseError as exc:
