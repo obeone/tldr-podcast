@@ -4,20 +4,24 @@ TLDR Newsletter → Podcast CLI.
 Usage
 -----
     python main.py --config config.yaml --eml path/to/newsletter.eml --dry-run
-    python main.py --config config.yaml  # fetches unread emails via IMAP
+    python main.py --config config.yaml                      # today via IMAP
+    python main.py --config config.yaml --date 2026-03-15   # specific date
 
 Options
 -------
---config    Path to the YAML configuration file (required).
---eml       Path to a local .eml file (skips IMAP fetch when provided).
---dry-run   Print the generated dialogue to stdout instead of calling TTS.
---verbose   Enable DEBUG-level logging.
+--config       Path to the YAML configuration file (required).
+--eml          Path to a local .eml file (skips IMAP fetch when provided).
+--date         Date to process in YYYY-MM-DD format (default: today).
+--dry-run      Print the generated dialogue to stdout instead of calling TTS.
+--no-progress  Disable the rich progress bar.
+--verbose      Enable DEBUG-level logging.
 """
 
 from __future__ import annotations
 
 import logging
 import re
+import shutil
 import sys
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -27,16 +31,48 @@ import coloredlogs
 from dotenv import load_dotenv
 from email import message_from_bytes
 from email.utils import parsedate_to_datetime
+from rich.console import Console
+from rich.progress import (
+    BarColumn,
+    Progress,
+    SpinnerColumn,
+    TaskProgressColumn,
+    TextColumn,
+    TimeElapsedColumn,
+)
 
 from tldr.audio_exporter import export_audio
 from tldr.config import ConfigError, load_config
 from tldr.email_parser import ParseError, parse_emails
 from tldr.imap_client import IMAPError, fetch_unread_emails, move_emails_to_folder
 from tldr.llm_summarizer import generate_dialogue
+from tldr.token_tracker import TokenTracker
 from tldr.tts_generator import generate_audio_chunks
 from tldr.web_scraper import scrape_articles
 
 logger = logging.getLogger(__name__)
+
+console = Console(stderr=False)
+
+
+def _check_ffmpeg() -> None:
+    """
+    Verify that ffmpeg is available in PATH and abort with a helpful message if not.
+
+    Raises
+    ------
+    SystemExit
+        Exits with code 1 if ffmpeg cannot be found.
+    """
+    if shutil.which("ffmpeg") is None:
+        click.echo(
+            "[ERROR] ffmpeg not found in PATH. Install it to enable audio export.\n"
+            "  macOS:         brew install ffmpeg\n"
+            "  Ubuntu/Debian: sudo apt install ffmpeg\n"
+            "  Windows:       https://ffmpeg.org/download.html",
+            err=True,
+        )
+        sys.exit(1)
 
 
 def _dedup_articles(articles: list) -> list:
@@ -106,6 +142,32 @@ def _setup_logging(verbose: bool) -> None:
     )
 
 
+def _make_progress(disable: bool) -> Progress:
+    """
+    Build a rich Progress instance with a consistent column layout.
+
+    Parameters
+    ----------
+    disable : bool
+        When ``True``, the progress bar renders nothing (all output is
+        suppressed).
+
+    Returns
+    -------
+    rich.progress.Progress
+        Configured progress instance.
+    """
+    return Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TaskProgressColumn(),
+        TimeElapsedColumn(),
+        console=console,
+        disable=disable,
+    )
+
+
 @click.command()
 @click.option(
     "--config",
@@ -122,10 +184,24 @@ def _setup_logging(verbose: bool) -> None:
     help="Path to a local .eml file (skips IMAP fetch).",
 )
 @click.option(
+    "--date",
+    "target_date_str",
+    default=None,
+    type=click.DateTime(formats=["%Y-%m-%d"]),
+    help="Date to process (YYYY-MM-DD). Ignored when --eml is used. Default: today.",
+)
+@click.option(
     "--dry-run",
     is_flag=True,
     default=False,
     help="Print generated dialogue to stdout instead of synthesising audio.",
+)
+@click.option(
+    "--no-progress",
+    "no_progress",
+    is_flag=True,
+    default=False,
+    help="Disable the rich progress bar.",
 )
 @click.option(
     "--verbose",
@@ -136,12 +212,22 @@ def _setup_logging(verbose: bool) -> None:
 def main(
     config_path: str,
     eml_path: str | None,
+    target_date_str: datetime | None,
     dry_run: bool,
+    no_progress: bool,
     verbose: bool,
 ) -> None:
-    """Convert today's TLDR newsletter emails into a single two-voice podcast MP3."""
+    """Convert TLDR newsletter emails into a single two-voice podcast MP3."""
     load_dotenv()
     _setup_logging(verbose)
+
+    target_date: date = target_date_str.date() if target_date_str else date.today()
+
+    # ------------------------------------------------------------------
+    # 0. Preflight checks
+    # ------------------------------------------------------------------
+    if not dry_run:
+        _check_ffmpeg()
 
     # ------------------------------------------------------------------
     # 1. Load configuration
@@ -156,6 +242,7 @@ def main(
     gemini_cfg = cfg.get("gemini", {})
     scraping_cfg = cfg.get("scraping", {})
     output_cfg = cfg.get("output", {})
+    pricing_cfg: dict = cfg.get("pricing", {})
 
     max_articles: int = scraping_cfg.get("max_articles", 15)
     scrape_timeout: int = scraping_cfg.get("timeout_seconds", 10)
@@ -167,28 +254,29 @@ def main(
 
     seen_folder: str = imap_cfg.get("seen_folder", "TLDR/Seen")
 
+    tracker = TokenTracker(pricing=pricing_cfg)
+
     # ------------------------------------------------------------------
     # 2. Fetch email(s)
     # ------------------------------------------------------------------
-    # imap_message_ids holds the server-side IDs needed to move messages later.
-    # It remains empty when a local .eml file is used (no IMAP involved).
     imap_message_ids: list[int] = []
     email_data: list[tuple[int, bytes]] = []
 
     if eml_path:
         logger.info("Reading local .eml file: %s", eml_path)
-        # Assign a placeholder ID of 0 — it is never used for moving.
         email_data = [(0, Path(eml_path).read_bytes())]
     else:
-        logger.info("Fetching unread emails via IMAP…")
+        logger.info("Fetching unread emails for %s via IMAP…", target_date)
         try:
-            email_data = fetch_unread_emails(imap_cfg, target_date=date.today())
+            email_data = fetch_unread_emails(imap_cfg, target_date=target_date)
         except IMAPError as exc:
             click.echo(f"[ERROR] IMAP error: {exc}", err=True)
             sys.exit(1)
 
         if not email_data:
-            click.echo("No unread TLDR emails found for today. Nothing to do.")
+            click.echo(
+                f"No unread TLDR emails found for {target_date}. Nothing to do."
+            )
             sys.exit(0)
 
         imap_message_ids = [msg_id for msg_id, _ in email_data]
@@ -218,30 +306,71 @@ def main(
     removed = before_dedup - len(all_articles)
     if removed:
         logger.info("Deduplication removed %d duplicate article(s).", removed)
+
+    # Truncate to max_articles before sending to LLM to avoid oversized prompts.
+    all_articles = all_articles[:max_articles]
     logger.info("%d unique article(s) ready for processing.", len(all_articles))
 
     # ------------------------------------------------------------------
-    # 4. Scrape + generate dialogue
+    # 4. Scrape + generate dialogue + TTS
     # ------------------------------------------------------------------
-    logger.info("Scraping full text…")
-    scrape_articles(all_articles, timeout=scrape_timeout, max_articles=max_articles)
+    with _make_progress(disable=no_progress) as progress:
 
-    logger.info("Generating dialogue via Gemini…")
-    chunks = generate_dialogue(all_articles, gemini_cfg, speaker1_name, speaker2_name)
+        # 4a. Scraping
+        scrape_task = progress.add_task(
+            f"[cyan]Scraping[/cyan] {len(all_articles)} article(s)…",
+            total=len(all_articles),
+        )
+        scrape_articles(
+            all_articles,
+            timeout=scrape_timeout,
+            max_articles=max_articles,
+            progress=progress,
+            task_id=scrape_task,
+        )
 
-    if dry_run:
-        click.echo("\n=== Daily Dialogue Preview ===\n")
-        for chunk in chunks:
-            click.echo(chunk.text)
-            click.echo()
-        sys.exit(0)
+        # 4b. Dialogue generation
+        llm_task = progress.add_task("[cyan]Generating dialogue…[/cyan]", total=1)
+        chunks = generate_dialogue(
+            all_articles,
+            gemini_cfg,
+            speaker1_name,
+            speaker2_name,
+            token_tracker=tracker,
+            progress=progress,
+            task_id=llm_task,
+        )
+        progress.console.print(
+            f"  [dim]Dialogue: {len(chunks)} chunk(s) — {tracker.live_line()}[/dim]"
+        )
+
+        if dry_run:
+            progress.stop()
+            click.echo("\n=== Daily Dialogue Preview ===\n")
+            for chunk in chunks:
+                click.echo(chunk.text)
+                click.echo()
+            sys.exit(0)
+
+        # 4c. TTS synthesis
+        tts_task = progress.add_task(
+            f"[cyan]TTS synthesis[/cyan] ({len(chunks)} chunk(s))…",
+            total=len(chunks),
+        )
+        pcm_chunks = generate_audio_chunks(
+            chunks,
+            gemini_cfg,
+            token_tracker=tracker,
+            progress=progress,
+            task_id=tts_task,
+        )
+        progress.console.print(
+            f"  [dim]TTS done — {tracker.live_line()}[/dim]"
+        )
 
     # ------------------------------------------------------------------
-    # 5. TTS → audio export
+    # 5. Audio export
     # ------------------------------------------------------------------
-    logger.info("Generating TTS audio for %d chunk(s)…", len(chunks))
-    pcm_chunks = generate_audio_chunks(chunks, gemini_cfg)
-
     timestamp = datetime.now().strftime("%Y-%m-%d_%H%M")
     filename = f"tldr_{timestamp}.{output_fmt}"
     out_path = Path(output_dir) / filename
@@ -251,7 +380,13 @@ def main(
     click.echo(f"Podcast saved to: {saved}")
 
     # ------------------------------------------------------------------
-    # 6. Move processed emails to the "seen" folder
+    # 6. Token / cost summary
+    # ------------------------------------------------------------------
+    click.echo()
+    click.echo(tracker.summary())
+
+    # ------------------------------------------------------------------
+    # 7. Move processed emails to the "seen" folder
     # ------------------------------------------------------------------
     if imap_message_ids:
         logger.info(

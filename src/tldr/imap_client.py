@@ -13,15 +13,9 @@ import logging
 from datetime import date, timedelta
 from typing import Any
 
-import coloredlogs
 from imapclient import IMAPClient
 
 logger = logging.getLogger(__name__)
-coloredlogs.install(
-    level="DEBUG",
-    logger=logger,
-    fmt="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
 
 
 class IMAPError(Exception):

@@ -22,6 +22,8 @@ gemini:
   text_model: gemini-2.0-flash
   # Gemini model for TTS audio generation
   tts_model: gemini-2.5-flash-preview-tts
+  # Language for the generated podcast dialogue and TTS preamble
+  language: French
   speaker1:
     name: Alex
     voice: Puck
@@ -50,3 +52,14 @@ output:
   directory: output
   # Output format: mp3 or wav
   format: mp3
+
+# Per-model pricing for token cost estimation (USD per 1 million tokens).
+# Update these values to match current Gemini pricing at:
+# https://ai.google.dev/pricing
+pricing:
+  gemini-2.0-flash:
+    input_per_1m: 0.10
+    output_per_1m: 0.40
+  gemini-2.5-flash-preview-tts:
+    input_per_1m: 0.50
+    output_per_1m: 0.00

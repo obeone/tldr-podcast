@@ -10,11 +10,16 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
 
 from google import genai
 from google.genai import types
 
 from tldr.retry import gemini_retry
+
+if TYPE_CHECKING:
+    from rich.progress import Progress
+    from tldr.token_tracker import TokenTracker
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +42,7 @@ Instructions:
 - Discuss each selected article in depth: explain what it is about, why it matters, \
 and explore its implications or connections to broader trends. \
 Aim for 3 to 5 exchanges per article.
-- The entire dialogue MUST be written in French.
+- The entire dialogue MUST be written in {language}.
 - The total dialogue must be at least {target_word_count} words.
 - Keep the tone informative but lively — like two curious friends catching up on tech news.
 - Reflect each host's personality in their speaking style and reactions.
@@ -74,6 +79,7 @@ def _build_prompt(
     min_articles: int = 8,
     max_articles: int = 12,
     target_word_count: int = 1200,
+    language: str = "French",
 ) -> str:
     """
     Build the full LLM prompt from the article list, speaker names, and personalities.
@@ -97,6 +103,8 @@ def _build_prompt(
         Maximum number of articles the LLM may cover, by default 12.
     target_word_count : int, optional
         Minimum total word count for the generated dialogue, by default 1200.
+    language : str, optional
+        Language for the generated dialogue, by default ``"French"``.
 
     Returns
     -------
@@ -121,6 +129,7 @@ def _build_prompt(
         min_articles=min_articles,
         max_articles=max_articles,
         target_word_count=target_word_count,
+        language=language,
         articles=articles_text,
     )
 
@@ -238,6 +247,9 @@ def generate_dialogue(
     gemini_cfg: dict,
     speaker1_name: str,
     speaker2_name: str,
+    token_tracker: TokenTracker | None = None,
+    progress: Progress | None = None,
+    task_id: Any = None,
 ) -> list[DialogueChunk]:
     """
     Generate a two-host podcast dialogue from a list of articles.
@@ -253,13 +265,21 @@ def generate_dialogue(
     gemini_cfg : dict
         Resolved Gemini configuration section from the YAML config, containing
         at minimum ``api_key`` and ``text_model`` keys.  Optional keys:
-        ``speaker1.personality`` and ``speaker2.personality`` strings used
-        to personalise each host's speaking style.
+        ``speaker1.personality``, ``speaker2.personality``, ``language``
+        (default ``"French"``), and ``dialogue`` sub-section.
     speaker1_name : str
         Display name of the first podcast host (used in the prompt and as a
         speaker-turn boundary marker).
     speaker2_name : str
         Display name of the second podcast host.
+    token_tracker : TokenTracker or None, optional
+        When provided, records prompt and candidates token counts for this call.
+    progress : rich.progress.Progress or None, optional
+        A rich :class:`~rich.progress.Progress` instance for displaying a
+        spinner.  When provided, ``task_id`` must also be supplied and will be
+        marked complete after the API call returns.
+    task_id : Any, optional
+        Task identifier returned by ``progress.add_task()``.
 
     Returns
     -------
@@ -279,6 +299,7 @@ def generate_dialogue(
     """
     speaker1_personality = gemini_cfg.get("speaker1", {}).get("personality", "")
     speaker2_personality = gemini_cfg.get("speaker2", {}).get("personality", "")
+    language = gemini_cfg.get("language", "French")
 
     dialogue_cfg = gemini_cfg.get("dialogue", {})
     min_articles = dialogue_cfg.get("min_articles", 8)
@@ -294,6 +315,7 @@ def generate_dialogue(
         min_articles=min_articles,
         max_articles=max_articles,
         target_word_count=target_word_count,
+        language=language,
     )
 
     logger.info(
@@ -306,18 +328,24 @@ def generate_dialogue(
     client = genai.Client(api_key=gemini_cfg["api_key"])
 
     @gemini_retry
-    def _call_api() -> str:
-        response = client.models.generate_content(
+    def _call_api():
+        return client.models.generate_content(
             model=gemini_cfg["text_model"],
             contents=prompt,
             config=types.GenerateContentConfig(
                 max_output_tokens=8192,
             ),
         )
-        return response.text
 
-    dialogue_text = _call_api()
+    response = _call_api()
 
+    if token_tracker is not None:
+        token_tracker.record_usage(gemini_cfg["text_model"], response.usage_metadata)
+
+    if progress is not None and task_id is not None:
+        progress.advance(task_id)
+
+    dialogue_text = response.text
     if not dialogue_text:
         raise RuntimeError("Gemini returned an empty dialogue response.")
 

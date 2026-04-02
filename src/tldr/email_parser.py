@@ -25,14 +25,7 @@ import re
 from dataclasses import dataclass, field
 from email.message import Message
 
-import coloredlogs
-
 logger = logging.getLogger(__name__)
-coloredlogs.install(
-    level="DEBUG",
-    logger=logger,
-    fmt="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
 
 
 # ---------------------------------------------------------------------------

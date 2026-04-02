@@ -12,11 +12,9 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-import coloredlogs
 from pydub import AudioSegment
 
 logger = logging.getLogger(__name__)
-coloredlogs.install(level="DEBUG", logger=logger)
 
 # Gemini TTS output format constants
 _SAMPLE_RATE = 24_000   # Hz
