@@ -245,6 +245,9 @@ def generate_audio_chunks(
         ]
     )
 
+    if not chunks:
+        return []
+
     max_workers = min(_TTS_MAX_WORKERS, len(chunks))
     logger.info(
         "Generating TTS for %d chunk(s) with up to %d worker(s)…",

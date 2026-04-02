@@ -175,15 +175,34 @@ class TestTTSGeneratorRetry:
 
     @patch("tldr.tts_generator.genai.Client")
     def test_retries_per_chunk_independently(self, mock_client_cls: MagicMock) -> None:
-        """Each chunk gets its own retry budget — a 503 on chunk 1 does not burn chunk 2's retries."""
+        """Each chunk gets its own retry budget — a 503 on chunk 1 does not burn chunk 2's retries.
+
+        With parallel execution the chunks are processed concurrently, so the
+        side_effect uses a content-aware function instead of a fixed call-order
+        list to ensure deterministic per-chunk responses.
+        """
+        import threading
+
         pcm1 = b"\xAA" * 50
         pcm2 = b"\xBB" * 50
+        chunk0_attempts = 0
+        lock = threading.Lock()
+
+        def _side_effect(*args, **kwargs):
+            """Return 503 on the first call for chunk 0; success otherwise."""
+            nonlocal chunk0_attempts
+            contents: str = kwargs.get("contents", "")
+            if "One" in contents:
+                with lock:
+                    chunk0_attempts += 1
+                    attempt = chunk0_attempts
+                if attempt == 1:
+                    raise _make_server_error(503)
+                return self._make_tts_response(pcm1)
+            return self._make_tts_response(pcm2)
+
         mock_model = MagicMock()
-        mock_model.generate_content.side_effect = [
-            _make_server_error(503),  # chunk 0, attempt 1 — fails
-            self._make_tts_response(pcm1),  # chunk 0, attempt 2 — succeeds
-            self._make_tts_response(pcm2),  # chunk 1, attempt 1 — succeeds
-        ]
+        mock_model.generate_content.side_effect = _side_effect
         mock_client_cls.return_value.models = mock_model
 
         chunks = [FakeChunk(text="Alex: One.", index=0), FakeChunk(text="Jordan: Two.", index=1)]
