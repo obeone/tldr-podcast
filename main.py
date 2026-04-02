@@ -45,7 +45,9 @@ from tldr.audio_exporter import export_audio
 from tldr.config import ConfigError, load_config
 from tldr.email_parser import ParseError, parse_emails
 from tldr.imap_client import IMAPError, fetch_unread_emails, move_emails_to_folder
+from tldr.link_extractor import extract_links
 from tldr.llm_summarizer import generate_dialogue
+from tldr.report_generator import generate_report
 from tldr.token_tracker import TokenTracker
 from tldr.tts_generator import generate_audio_chunks
 from tldr.web_scraper import scrape_articles
@@ -209,6 +211,12 @@ def _make_progress(disable: bool) -> Progress:
     default=False,
     help="Enable DEBUG-level logging.",
 )
+@click.option(
+    "--report",
+    is_flag=True,
+    default=False,
+    help="Generate a report folder (articles, script, links) alongside the podcast.",
+)
 def main(
     config_path: str,
     eml_path: str | None,
@@ -216,6 +224,7 @@ def main(
     dry_run: bool,
     no_progress: bool,
     verbose: bool,
+    report: bool,
 ) -> None:
     """Convert TLDR newsletter emails into a single two-voice podcast MP3."""
     load_dotenv()
@@ -329,7 +338,22 @@ def main(
             task_id=scrape_task,
         )
 
-        # 4b. Dialogue generation
+        # 4b. Link extraction (when --report is requested)
+        link_report = None
+        if report:
+            link_report = extract_links(all_articles)
+            logger.info(
+                "Link report: %d link(s) extracted (%d source, %d repo, "
+                "%d model, %d paper, %d other).",
+                link_report.total,
+                len(link_report.sources),
+                len(link_report.repos),
+                len(link_report.models),
+                len(link_report.papers),
+                len(link_report.other),
+            )
+
+        # 4c. Dialogue generation
         llm_task = progress.add_task("[cyan]Generating dialogue…[/cyan]", total=1)
         chunks = generate_dialogue(
             all_articles,
@@ -350,6 +374,20 @@ def main(
             for chunk in chunks:
                 click.echo(chunk.text)
                 click.echo()
+            if link_report is not None:
+                click.echo("=== Link Report ===\n")
+                for heading, items in (
+                    ("Source Articles", link_report.sources),
+                    ("Repositories", link_report.repos),
+                    ("Models", link_report.models),
+                    ("Papers", link_report.papers),
+                    ("Other Links", link_report.other),
+                ):
+                    if items:
+                        click.echo(f"## {heading}")
+                        for lnk in items:
+                            click.echo(f"  - [{lnk.label}] {lnk.url}")
+                        click.echo()
             sys.exit(0)
 
         # 4c. TTS synthesis
@@ -380,13 +418,26 @@ def main(
     click.echo(f"Podcast saved to: {saved}")
 
     # ------------------------------------------------------------------
-    # 6. Token / cost summary
+    # 6. Report folder (when --report is requested)
+    # ------------------------------------------------------------------
+    if link_report is not None:
+        report_dir = generate_report(
+            articles=all_articles,
+            chunks=chunks,
+            link_report=link_report,
+            output_dir=output_dir,
+            timestamp=timestamp,
+        )
+        click.echo(f"Report folder saved to: {report_dir}")
+
+    # ------------------------------------------------------------------
+    # 7. Token / cost summary
     # ------------------------------------------------------------------
     click.echo()
     click.echo(tracker.summary())
 
     # ------------------------------------------------------------------
-    # 7. Move processed emails to the "seen" folder
+    # 8. Move processed emails to the "seen" folder
     # ------------------------------------------------------------------
     if imap_message_ids:
         logger.info(
