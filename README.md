@@ -1,9 +1,9 @@
 # tldr-podcast
 
 ![Python](https://img.shields.io/badge/Python-3.13+-blue?logo=python&logoColor=white)
-![Gemini](https://img.shields.io/badge/Gemini-TTS%20%7C%20Flash-4285F4?logo=google&logoColor=white)
+![Gemini](https://img.shields.io/badge/Gemini-Flash%20%7C%20TTS-4285F4?logo=google&logoColor=white)
 ![ffmpeg](https://img.shields.io/badge/ffmpeg-required-green?logo=ffmpeg&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-57%20passed-brightgreen)
+![Tests](https://img.shields.io/badge/tests-118%20passed-brightgreen)
 
 Converts TLDR newsletters into a two-voice podcast MP3 using Gemini AI.
 
@@ -13,16 +13,22 @@ Converts TLDR newsletters into a two-voice podcast MP3 using Gemini AI.
 
 ```mermaid
 flowchart TB
-    A[📧 IMAP / .eml file] --> B[Email Parser]
-    B --> C[Article list<br>no sponsors]
-    C --> D[Web Scraper<br>trafilatura]
-    D --> E[Articles with<br>full text]
-    E --> F[LLM Summarizer<br>Gemini Flash]
-    F --> G[Dialogue chunks<br>≤ 3 800 bytes each]
-    G --> H[TTS Generator<br>Gemini multi-speaker]
-    H --> I[Raw PCM chunks<br>24 kHz mono 16-bit]
-    I --> J[Audio Exporter<br>pydub + ffmpeg]
-    J --> K[🎙️ output/tldr_YYYY-MM-DD_HHMM.mp3]
+    IN[📧 IMAP / .eml file] --> EP[Email Parser<br>sponsor filter]
+    EP --> WS[Web Scraper<br>trafilatura]
+
+    WS --> LLM[LLM Summarizer<br>Gemini Flash]
+    WS --> LE[Link Extractor<br>repos · models · papers]
+
+    LLM --> DC[Dialogue chunks<br>≤ 3 800 bytes]
+
+    DC --> TTS[TTS Generator<br>Gemini multi-speaker]
+    DC --> RPT[📊 Report Generator]
+    LE --> RPT
+
+    TTS --> AE[Audio Exporter<br>pydub + ffmpeg]
+
+    AE --> MP3[🎙️ .mp3]
+    RPT --> OUT[📂 articles · script · links]
 ```
 
 ---
@@ -31,14 +37,20 @@ flowchart TB
 
 | Feature | Details |
 | --- | --- |
-| 📬 IMAP fetch | Retrieves unread TLDR emails via SSL |
+| 📬 IMAP fetch | Retrieves unread TLDR emails via SSL, moves processed emails to a configurable folder |
+| 📅 Date filter | Deduplicates emails per day with `--date YYYY-MM-DD` |
 | 🚫 Sponsor filter | Strips `TOGETHER WITH`, `SPONSOR`, ads |
 | 🌐 Article scraping | Full text via trafilatura, fallback to summary |
-| 🤖 AI curation | Gemini Flash selects 5-8 interesting stories |
-| 🎙️ Two-voice TTS | Configurable speaker names and Gemini voices |
+| 🔗 Link extraction | Categorises URLs into repos, models, papers, sources |
+| 🤖 AI curation | Gemini Flash selects 8-12 interesting stories (configurable) |
+| 🎙️ Two-voice TTS | Configurable speaker names, voices, and personalities |
+| 🌍 Multi-language | Dialogue and TTS language configurable (`language` key) |
 | 🎵 MP3 / WAV export | pydub + ffmpeg, auto-creates output directories |
+| 📊 Report generation | `--report` creates a timestamped folder with articles, script, and links |
+| 💰 Token tracking | Live token usage and cost display per Gemini model |
 | 🔍 Dry-run mode | Print dialogue without calling TTS |
 | 📂 Local .eml mode | Test with a saved email, no IMAP required |
+| 🔄 Retry logic | Automatic retry with backoff for transient API failures |
 
 ---
 
@@ -86,17 +98,29 @@ imap:
   username: your@email.com
   password_env: IMAP_PASSWORD   # name of env var holding the password
   folder: INBOX
+  seen_folder: TLDR/Seen        # folder for processed emails
 
 gemini:
   api_key_env: GEMINI_API_KEY   # name of env var holding the API key
   text_model: gemini-2.0-flash
   tts_model: gemini-2.5-flash-preview-tts
+  language: French              # dialogue and TTS language
   speaker1:
     name: Alex
     voice: Puck
+    personality: "curious, enthusiastic"
   speaker2:
     name: Jordan
     voice: Charon
+    personality: "analytical, witty"
+  dialogue:
+    min_articles: 8
+    max_articles: 12
+    target_word_count: 3000
+  tts_style:
+    pace: "natural conversational pace"
+    scene: "two hosts in a podcast studio"
+    temperature: 1.0             # expressiveness (0.0–2.0)
 
 scraping:
   max_articles: 15
@@ -104,7 +128,15 @@ scraping:
 
 output:
   directory: output
-  format: mp3           # mp3 or wav
+  format: mp3                    # mp3 or wav
+
+pricing:                         # USD per 1M tokens (for cost tracking)
+  gemini-2.0-flash:
+    input: 0.10
+    output: 0.40
+  gemini-2.5-flash-preview-tts:
+    input: 0.15
+    output: 0.60
 ```
 
 Keys ending in `_env` reference environment variable **names** — the actual
@@ -132,7 +164,10 @@ export IMAP_PASSWORD="your-password"
 | --- | --- |
 | `python main.py --config config.yaml` | Fetch unread emails via IMAP and generate podcast |
 | `python main.py --config config.yaml --eml file.eml` | Use a local `.eml` file |
+| `python main.py --config config.yaml --date 2026-03-15` | Target a specific date |
 | `python main.py --config config.yaml --eml file.eml --dry-run` | Print dialogue only, no TTS |
+| `python main.py --config config.yaml --report` | Generate report folder alongside podcast |
+| `python main.py --config config.yaml --no-progress` | Disable rich progress bar |
 | `python main.py --config config.yaml --verbose` | Enable DEBUG logging |
 
 ### Example — dry-run on a saved email
@@ -144,11 +179,14 @@ python main.py \
   --dry-run
 ```
 
-### Example — full pipeline
+### Example — full pipeline with report
 
 ```bash
-python main.py --config config.yaml --eml "mails/newsletter.eml"
+python main.py --config config.yaml --eml "mails/newsletter.eml" --report
 # → output/tldr_2026-02-22_1430.mp3
+# → output/tldr_2026-02-22_1430/articles.md
+# → output/tldr_2026-02-22_1430/script.md
+# → output/tldr_2026-02-22_1430/summary.md
 ```
 
 ---
@@ -159,7 +197,7 @@ python main.py --config config.yaml --eml "mails/newsletter.eml"
 uv run pytest tests/ -v
 ```
 
-57 unit tests covering every module. All external APIs are mocked.
+118 unit tests covering every module. All external APIs are mocked.
 
 ---
 
@@ -175,10 +213,14 @@ tldr-podcast/
 │   ├── imap_client.py         # IMAP SSL client
 │   ├── email_parser.py        # MIME parser → Article dataclass list
 │   ├── web_scraper.py         # trafilatura scraper with fallback
+│   ├── link_extractor.py      # URL extraction and categorisation
 │   ├── llm_summarizer.py      # Gemini Flash dialogue + chunking
 │   ├── tts_generator.py       # Gemini multi-speaker TTS
-│   └── audio_exporter.py      # PCM → MP3/WAV via pydub
-├── tests/                     # 57 pytest unit tests
+│   ├── audio_exporter.py      # PCM → MP3/WAV via pydub
+│   ├── report_generator.py    # Timestamped report folder output
+│   ├── token_tracker.py       # Token usage and cost tracking
+│   └── retry.py               # Retry with exponential backoff
+├── tests/                     # 118 pytest unit tests (11 files)
 └── mails/                     # Sample .eml files for testing
 ```
 
@@ -192,6 +234,7 @@ tldr-podcast/
   automatically splits dialogue at speaker-turn boundaries.
 - Sponsor sections (`TOGETHER WITH`, `SPONSOR`, etc.) are filtered out
   before article selection.
+- Token costs are tracked live and displayed at the end of each run.
 
 ---
 
