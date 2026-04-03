@@ -18,10 +18,18 @@ imap:
 gemini:
   # Name of the environment variable holding your Gemini API key
   api_key_env: GEMINI_API_KEY
-  # Gemini model for dialogue generation (text)
+  # Gemini model for dialogue generation (text / script writer)
   text_model: gemini-2.0-flash
+  # Optional: cheaper model for pre-summarizing articles before dialogue
+  # generation.  When set (and different from text_model), each article is
+  # summarized first, reducing the token count sent to the script writer.
+  # summary_model: gemini-2.0-flash-lite
   # Gemini model for TTS audio generation
   tts_model: gemini-2.5-flash-preview-tts
+  # Optional: API service tier — "flex" (cheaper/slower) or "priority"
+  # (faster/pricier).  Omit or leave empty for standard tier.
+  # TTS does not support service tiers.
+  # service_tier: flex
   # Language for the generated podcast dialogue and TTS preamble
   language: French
   speaker1:
@@ -56,10 +64,34 @@ output:
 # Per-model pricing for token cost estimation (USD per 1 million tokens).
 # Update these values to match current Gemini pricing at:
 # https://ai.google.dev/pricing
+#
+# Flat format (applies regardless of service_tier):
+#   model-name:
+#     input_per_1m: 0.50
+#     output_per_1m: 3.00
+#
+# Tier-aware format (selected by gemini.service_tier):
+#   model-name:
+#     standard:
+#       input_per_1m: 0.50
+#       output_per_1m: 3.00
+#     flex:
+#       input_per_1m: 0.25
+#       output_per_1m: 1.50
 pricing:
   gemini-2.0-flash:
-    input_per_1m: 0.10
-    output_per_1m: 0.40
-  gemini-2.5-flash-preview-tts:
-    input_per_1m: 0.50
-    output_per_1m: 0.00
+    input_per_1m: 0.075
+    output_per_1m: 0.30
+  gemini-2.0-flash-lite:
+    input_per_1m: 0.025
+    output_per_1m: 0.10
+  gemini-3-flash-preview:
+    standard:
+      input_per_1m: 0.50
+      output_per_1m: 3.00
+    flex:
+      input_per_1m: 0.25
+      output_per_1m: 1.50
+  gemini-2.5-pro-preview-tts:
+    input_per_1m: 1.00
+    output_per_1m: 10.00

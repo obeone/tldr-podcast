@@ -9,7 +9,7 @@ per-model pricing, and produces a human-readable summary.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -60,13 +60,72 @@ class TokenTracker:
     >>> print(tracker.summary())
     """
 
-    def __init__(self, pricing: dict[str, dict[str, float]] | None = None) -> None:
+    def __init__(
+        self,
+        pricing: dict[str, dict] | None = None,
+        service_tier: str | None = None,
+    ) -> None:
         self._usage: dict[str, _ModelUsage] = {}
-        self._pricing: dict[str, dict[str, float]] = pricing or {}
+        self._raw_pricing: dict[str, dict] = pricing or {}
+        self._service_tier = service_tier
+        self._pricing: dict[str, dict[str, float]] = self._resolve_pricing(
+            self._raw_pricing, self._service_tier,
+        )
 
     # ------------------------------------------------------------------
     # Configuration
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _resolve_pricing(
+        raw: dict[str, dict],
+        service_tier: str | None,
+    ) -> dict[str, dict[str, float]]:
+        """
+        Resolve tier-aware pricing into a flat per-model table.
+
+        Supports two formats per model:
+
+        * **Flat** — ``{"input_per_1m": float, "output_per_1m": float}``
+        * **Tier-aware** — ``{"standard": {…}, "flex": {…}, "priority": {…}}``
+
+        When tier-aware entries are present, the active *service_tier* selects
+        the matching sub-dict.  Falls back to ``"standard"`` if the requested
+        tier is missing, then to the first available sub-tier.
+
+        Parameters
+        ----------
+        raw : dict[str, dict]
+            Raw pricing table (may mix flat and tier-aware entries).
+        service_tier : str or None
+            Active service tier (``"flex"``, ``"priority"``, or ``None`` for
+            standard).
+
+        Returns
+        -------
+        dict[str, dict[str, float]]
+            Flat pricing table keyed by model name.
+        """
+        resolved: dict[str, dict[str, float]] = {}
+        tier = service_tier or "standard"
+
+        for model, value in raw.items():
+            if "input_per_1m" in value:
+                # Flat format
+                resolved[model] = value
+            elif isinstance(value, dict):
+                # Tier-aware format
+                if tier in value:
+                    resolved[model] = value[tier]
+                elif "standard" in value:
+                    resolved[model] = value["standard"]
+                else:
+                    # Fallback to first available tier
+                    first = next(iter(value.values()), {})
+                    if isinstance(first, dict):
+                        resolved[model] = first
+
+        return resolved
 
     def set_pricing(self, pricing: dict[str, dict[str, float]]) -> None:
         """

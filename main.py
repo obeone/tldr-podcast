@@ -46,7 +46,7 @@ from tldr.config import ConfigError, load_config
 from tldr.email_parser import ParseError, parse_emails
 from tldr.imap_client import IMAPError, fetch_unread_emails, move_emails_to_folder
 from tldr.link_extractor import extract_links
-from tldr.llm_summarizer import generate_dialogue
+from tldr.llm_summarizer import generate_dialogue, summarize_articles
 from tldr.report_generator import generate_report
 from tldr.token_tracker import TokenTracker
 from tldr.tts_generator import generate_audio_chunks
@@ -263,7 +263,11 @@ def main(
 
     seen_folder: str = imap_cfg.get("seen_folder", "TLDR/Seen")
 
-    tracker = TokenTracker(pricing=pricing_cfg)
+    service_tier: str | None = gemini_cfg.get("service_tier") or None
+    if service_tier:
+        logger.info("Gemini service tier: %s", service_tier)
+
+    tracker = TokenTracker(pricing=pricing_cfg, service_tier=service_tier)
 
     # ------------------------------------------------------------------
     # 2. Fetch email(s)
@@ -353,7 +357,25 @@ def main(
                 len(link_report.other),
             )
 
-        # 4c. Dialogue generation
+        # 4c. Pre-summarization (optional, when summary_model is configured)
+        if gemini_cfg.get("summary_model") and gemini_cfg["summary_model"] != gemini_cfg.get("text_model"):
+            summary_task = progress.add_task(
+                "[cyan]Summarizing articles…[/cyan]",
+                total=1,
+            )
+            all_articles = summarize_articles(
+                all_articles,
+                gemini_cfg,
+                token_tracker=tracker,
+                progress=progress,
+                task_id=summary_task,
+            )
+            progress.update(
+                summary_task,
+                description=f"[cyan]Summarized[/cyan] — {tracker.live_line()}",
+            )
+
+        # 4d. Dialogue generation
         llm_task = progress.add_task("[cyan]Generating dialogue…[/cyan]", total=1)
         chunks = generate_dialogue(
             all_articles,
@@ -364,8 +386,9 @@ def main(
             progress=progress,
             task_id=llm_task,
         )
-        progress.console.print(
-            f"  [dim]Dialogue: {len(chunks)} chunk(s) — {tracker.live_line()}[/dim]"
+        progress.update(
+            llm_task,
+            description=f"[cyan]Dialogue[/cyan]: {len(chunks)} chunk(s) — {tracker.live_line()}",
         )
 
         if dry_run:
@@ -390,7 +413,7 @@ def main(
                         click.echo()
             sys.exit(0)
 
-        # 4c. TTS synthesis
+        # 4e. TTS synthesis
         tts_task = progress.add_task(
             f"[cyan]TTS synthesis[/cyan] ({len(chunks)} chunk(s))…",
             total=len(chunks),

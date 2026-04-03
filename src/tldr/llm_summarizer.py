@@ -28,6 +28,21 @@ logger = logging.getLogger(__name__)
 # that tts_generator.py prepends before sending to the Gemini TTS API.
 _MAX_CHUNK_BYTES = 3000
 
+_SUMMARY_PROMPT_TEMPLATE = """\
+You are a tech journalist summarizer. For each article below, produce a concise \
+summary (3–5 sentences) capturing the key facts, significance, and any notable \
+numbers or quotes. Keep technical accuracy. Write in {language}.
+
+STRICT OUTPUT FORMAT:
+- One summary block per article, prefixed with the article number in brackets.
+- Example: [1] Summary text here.
+- Separate blocks with a blank line.
+- Do NOT add any introduction or conclusion outside the summary blocks.
+
+Articles:
+{articles}
+"""
+
 _SYSTEM_PROMPT_TEMPLATE = """\
 You are a podcast script writer. Your job is to create an engaging, \
 conversational podcast dialogue between two hosts: {speaker1} and {speaker2}.
@@ -242,6 +257,146 @@ class DialogueChunk:
     index: int
 
 
+def summarize_articles(
+    articles: list,
+    gemini_cfg: dict,
+    token_tracker: TokenTracker | None = None,
+    progress: Progress | None = None,
+    task_id: Any = None,
+) -> list:
+    """
+    Pre-summarize articles with a cheaper model before dialogue generation.
+
+    Each article's ``full_text`` (or ``summary``) is replaced by a compact
+    LLM-generated summary.  This reduces the token count sent to the more
+    expensive script-writer model in :func:`generate_dialogue`.
+
+    The model used is ``gemini_cfg["summary_model"]``.  If this key is absent
+    or equal to ``gemini_cfg["text_model"]``, the function returns *articles*
+    unchanged (no-op).
+
+    Parameters
+    ----------
+    articles : list
+        Article-like objects with ``title``, ``url``, ``full_text`` / ``summary``.
+    gemini_cfg : dict
+        Gemini configuration containing ``api_key`` and ``summary_model``.
+    token_tracker : TokenTracker or None, optional
+        Records token usage for the summarization call.
+    progress : rich.progress.Progress or None, optional
+        Progress bar instance.
+    task_id : Any, optional
+        Task identifier for the progress bar.
+
+    Returns
+    -------
+    list
+        The same article objects with ``full_text`` replaced by the LLM summary.
+    """
+    summary_model = gemini_cfg.get("summary_model")
+    if not summary_model or summary_model == gemini_cfg.get("text_model"):
+        logger.info("No separate summary_model configured — skipping pre-summarization.")
+        if progress is not None and task_id is not None:
+            progress.advance(task_id)
+        return articles
+
+    language = gemini_cfg.get("language", "French")
+
+    article_blocks: list[str] = []
+    for i, article in enumerate(articles, start=1):
+        text = getattr(article, "full_text", "") or getattr(article, "summary", "")
+        title = getattr(article, "title", f"Article {i}")
+        url = getattr(article, "url", "")
+        block = f"[{i}] {title}\nURL: {url}\n{text}"
+        article_blocks.append(block)
+
+    prompt = _SUMMARY_PROMPT_TEMPLATE.format(
+        language=language,
+        articles="\n\n".join(article_blocks),
+    )
+
+    logger.info(
+        "Pre-summarizing %d article(s) with model '%s'.",
+        len(articles),
+        summary_model,
+    )
+
+    client = genai.Client(api_key=gemini_cfg["api_key"])
+    service_tier = gemini_cfg.get("service_tier")
+
+    config_kwargs: dict[str, Any] = {"max_output_tokens": 4096}
+    if service_tier:
+        config_kwargs["http_options"] = types.HttpOptions(
+            headers={"x-goog-api-service-tier": service_tier},
+        )
+
+    @gemini_retry
+    def _call_api():
+        return client.models.generate_content(
+            model=summary_model,
+            contents=prompt,
+            config=types.GenerateContentConfig(**config_kwargs),
+        )
+
+    response = _call_api()
+
+    if token_tracker is not None:
+        token_tracker.record_usage(summary_model, response.usage_metadata)
+
+    if progress is not None and task_id is not None:
+        progress.advance(task_id)
+        if token_tracker is not None:
+            progress.update(
+                task_id,
+                description=f"[cyan]Summarized[/cyan] — {token_tracker.live_line()}",
+            )
+
+    summary_text = response.text
+    if not summary_text:
+        logger.warning("Summary model returned empty text — keeping original articles.")
+        return articles
+
+    summaries = _parse_summaries(summary_text, len(articles))
+
+    for i, article in enumerate(articles):
+        if i < len(summaries) and summaries[i]:
+            article.full_text = summaries[i]
+            logger.debug("Article %d summarized: %d chars.", i, len(summaries[i]))
+
+    return articles
+
+
+def _parse_summaries(text: str, expected_count: int) -> list[str]:
+    """
+    Parse numbered summary blocks from the LLM output.
+
+    Parameters
+    ----------
+    text : str
+        Raw LLM output containing ``[N] summary`` blocks.
+    expected_count : int
+        Number of articles expected.
+
+    Returns
+    -------
+    list[str]
+        One summary string per article index (0-based).  Missing entries are
+        empty strings.
+    """
+    import re
+
+    summaries: list[str] = [""] * expected_count
+    # Match blocks like "[1] Some summary text..."
+    pattern = re.compile(r"\[(\d+)\]\s*(.+?)(?=\n\[|\Z)", re.DOTALL)
+
+    for match in pattern.finditer(text):
+        idx = int(match.group(1)) - 1  # convert to 0-based
+        if 0 <= idx < expected_count:
+            summaries[idx] = match.group(2).strip()
+
+    return summaries
+
+
 def generate_dialogue(
     articles: list,
     gemini_cfg: dict,
@@ -326,15 +481,20 @@ def generate_dialogue(
     logger.debug("Prompt length: %d chars.", len(prompt))
 
     client = genai.Client(api_key=gemini_cfg["api_key"])
+    service_tier = gemini_cfg.get("service_tier")
+
+    config_kwargs: dict[str, Any] = {"max_output_tokens": 8192}
+    if service_tier:
+        config_kwargs["http_options"] = types.HttpOptions(
+            headers={"x-goog-api-service-tier": service_tier},
+        )
 
     @gemini_retry
     def _call_api():
         return client.models.generate_content(
             model=gemini_cfg["text_model"],
             contents=prompt,
-            config=types.GenerateContentConfig(
-                max_output_tokens=8192,
-            ),
+            config=types.GenerateContentConfig(**config_kwargs),
         )
 
     response = _call_api()
@@ -344,6 +504,11 @@ def generate_dialogue(
 
     if progress is not None and task_id is not None:
         progress.advance(task_id)
+        if token_tracker is not None:
+            progress.update(
+                task_id,
+                description=f"[cyan]Dialogue[/cyan] — {token_tracker.live_line()}",
+            )
 
     dialogue_text = response.text
     if not dialogue_text:
