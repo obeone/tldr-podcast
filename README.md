@@ -3,7 +3,7 @@
 ![Python](https://img.shields.io/badge/Python-3.13+-blue?logo=python&logoColor=white)
 ![Gemini](https://img.shields.io/badge/Gemini-Flash%20%7C%20TTS-4285F4?logo=google&logoColor=white)
 ![ffmpeg](https://img.shields.io/badge/ffmpeg-required-green?logo=ffmpeg&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-118%20passed-brightgreen)
+![Tests](https://img.shields.io/badge/tests-156%20passed-brightgreen)
 
 Converts TLDR newsletters into a two-voice podcast MP3 using Gemini AI.
 
@@ -16,8 +16,10 @@ flowchart TB
     IN[📧 IMAP / .eml file] --> EP[Email Parser<br>sponsor filter]
     EP --> WS[Web Scraper<br>trafilatura]
 
-    WS --> LLM[LLM Summarizer<br>Gemini Flash]
+    WS --> SUM[Pre-Summarizer<br>cheap model · optional]
     WS --> LE[Link Extractor<br>repos · models · papers]
+
+    SUM --> LLM[Script Writer<br>Gemini Flash]
 
     LLM --> DC[Dialogue chunks<br>≤ 3 800 bytes]
 
@@ -43,11 +45,13 @@ flowchart TB
 | 🌐 Article scraping | Full text via trafilatura, fallback to summary |
 | 🔗 Link extraction | Categorises URLs into repos, models, papers, sources |
 | 🤖 AI curation | Gemini Flash selects 8-12 interesting stories (configurable) |
+| 📝 Pre-summarization | Optional cheap model summarizes articles before script writing |
+| ⚡ Service tiers | Support for `flex` (cheaper) and `priority` (faster) API tiers |
 | 🎙️ Two-voice TTS | Configurable speaker names, voices, and personalities |
 | 🌍 Multi-language | Dialogue and TTS language configurable (`language` key) |
 | 🎵 MP3 / WAV export | pydub + ffmpeg, auto-creates output directories |
 | 📊 Report generation | `--report` creates a timestamped folder with articles, script, and links |
-| 💰 Token tracking | Live token usage and cost display per Gemini model |
+| 💰 Token tracking | Real-time token usage and cost display on progress bars, tier-aware pricing |
 | 🔍 Dry-run mode | Print dialogue without calling TTS |
 | 📂 Local .eml mode | Test with a saved email, no IMAP required |
 | 🔄 Retry logic | Automatic retry with backoff for transient API failures |
@@ -103,7 +107,9 @@ imap:
 gemini:
   api_key_env: GEMINI_API_KEY   # name of env var holding the API key
   text_model: gemini-2.0-flash
+  # summary_model: gemini-2.0-flash-lite  # optional cheap pre-summarizer
   tts_model: gemini-2.5-flash-preview-tts
+  # service_tier: flex          # optional: flex | priority (omit for standard)
   language: French              # dialogue and TTS language
   speaker1:
     name: Alex
@@ -197,7 +203,7 @@ python main.py --config config.yaml --eml "mails/newsletter.eml" --report
 uv run pytest tests/ -v
 ```
 
-118 unit tests covering every module. All external APIs are mocked.
+156 unit tests covering every module. All external APIs are mocked.
 
 ---
 
@@ -220,7 +226,7 @@ tldr-podcast/
 │   ├── report_generator.py    # Timestamped report folder output
 │   ├── token_tracker.py       # Token usage and cost tracking
 │   └── retry.py               # Retry with exponential backoff
-├── tests/                     # 118 pytest unit tests (11 files)
+├── tests/                     # 156 pytest unit tests (13 files)
 └── mails/                     # Sample .eml files for testing
 ```
 
