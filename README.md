@@ -14,14 +14,14 @@ Converts TLDR newsletters into a two-voice podcast MP3 using Gemini AI.
 ```mermaid
 flowchart TB
     A[📧 IMAP / .eml file] --> B[Email Parser]
-    B --> C[Article list\nno sponsors]
-    C --> D[Web Scraper\ntrafilatura]
-    D --> E[Articles with\nfull text]
-    E --> F[LLM Summarizer\nGemini Flash]
-    F --> G[Dialogue chunks\n≤ 3 800 bytes each]
-    G --> H[TTS Generator\nGemini multi-speaker]
-    H --> I[Raw PCM chunks\n24 kHz mono 16-bit]
-    I --> J[Audio Exporter\npydub + ffmpeg]
+    B --> C[Article list<br>no sponsors]
+    C --> D[Web Scraper<br>trafilatura]
+    D --> E[Articles with<br>full text]
+    E --> F[LLM Summarizer<br>Gemini Flash]
+    F --> G[Dialogue chunks<br>≤ 3 800 bytes each]
+    G --> H[TTS Generator<br>Gemini multi-speaker]
+    H --> I[Raw PCM chunks<br>24 kHz mono 16-bit]
+    I --> J[Audio Exporter<br>pydub + ffmpeg]
     J --> K[🎙️ output/tldr_YYYY-MM-DD_HHMM.mp3]
 ```
 
