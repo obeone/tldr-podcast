@@ -26,5 +26,8 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
+[project.scripts]
+tldr-podcast = "tldr.cli:main"
+
 [tool.setuptools.packages.find]
 where = ["src"]
