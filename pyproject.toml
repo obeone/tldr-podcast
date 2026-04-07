@@ -27,7 +27,7 @@ dev = [
 testpaths = ["tests"]
 
 [project.scripts]
-tldr-podcast = "tldr.cli:main"
+tldr-podcast = "tldr.cli:cli"
 
 [tool.setuptools.packages.find]
 where = ["src"]

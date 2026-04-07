@@ -1,25 +1,27 @@
 """
 TLDR Newsletter → Podcast CLI.
 
-Usage
------
-    python main.py --config config.yaml --eml path/to/newsletter.eml --dry-run
-    python main.py --config config.yaml                      # today via IMAP
-    python main.py --config config.yaml --date 2026-03-15   # specific date
+Commands
+--------
+    tldr-podcast run [OPTIONS]      Run the full pipeline.
+    tldr-podcast config init        Interactive configuration wizard.
+    tldr-podcast config show        Display the current configuration file.
 
-Options
--------
---config       Path to the YAML configuration file (required).
+Run options
+-----------
+--config       Path to the YAML configuration file (default: ~/.config/tldr/config.yaml).
 --eml          Path to a local .eml file (skips IMAP fetch when provided).
 --date         Date to process in YYYY-MM-DD format (default: today).
 --dry-run      Print the generated dialogue to stdout instead of calling TTS.
 --no-progress  Disable the rich progress bar.
 --verbose      Enable DEBUG-level logging.
+--report       Generate a report folder alongside the podcast.
 """
 
 from __future__ import annotations
 
 import logging
+import os
 import re
 import shutil
 import sys
@@ -28,6 +30,7 @@ from pathlib import Path
 
 import click
 import coloredlogs
+import yaml
 from dotenv import load_dotenv
 from email import message_from_bytes
 from email.utils import parsedate_to_datetime
@@ -40,6 +43,7 @@ from rich.progress import (
     TextColumn,
     TimeElapsedColumn,
 )
+from rich.syntax import Syntax
 
 from tldr.audio_exporter import export_audio
 from tldr.config import ConfigError, load_config
@@ -56,6 +60,17 @@ logger = logging.getLogger(__name__)
 
 console = Console(stderr=False)
 
+_DEFAULT_CONFIG = Path.home() / ".config" / "tldr" / "config.yaml"
+
+_GEMINI_VOICES = [
+    "Puck", "Charon", "Kore", "Fenrir", "Aoede",
+    "Leda", "Orus", "Zephyr",
+]
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
 
 def _check_ffmpeg() -> None:
     """
@@ -170,13 +185,58 @@ def _make_progress(disable: bool) -> Progress:
     )
 
 
-@click.command()
+def _resolve_config_path(config_path: str | None) -> str:
+    """
+    Return the effective config file path, falling back to the XDG default.
+
+    Parameters
+    ----------
+    config_path : str | None
+        Path supplied via ``--config``, or ``None`` to use the default.
+
+    Returns
+    -------
+    str
+        Resolved path to an existing config file.
+
+    Raises
+    ------
+    SystemExit
+        Exits with code 1 if no config file can be found.
+    """
+    if config_path is not None:
+        return config_path
+    if _DEFAULT_CONFIG.exists():
+        return str(_DEFAULT_CONFIG)
+    click.echo(
+        f"[ERROR] No --config provided and no default config found at {_DEFAULT_CONFIG}.\n"
+        f"  Run `tldr-podcast config init` to create one.",
+        err=True,
+    )
+    sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
+# Top-level group
+# ---------------------------------------------------------------------------
+
+@click.group()
+def cli() -> None:
+    """TLDR Newsletter → Podcast: convert newsletters into two-voice MP3 podcasts."""
+
+
+# ---------------------------------------------------------------------------
+# `run` command
+# ---------------------------------------------------------------------------
+
+@cli.command("run")
 @click.option(
     "--config",
     "config_path",
-    required=True,
-    type=click.Path(exists=True, dir_okay=False),
-    help="Path to the YAML configuration file.",
+    required=False,
+    default=None,
+    type=click.Path(dir_okay=False),
+    help=f"Path to the YAML configuration file. Defaults to {_DEFAULT_CONFIG}.",
 )
 @click.option(
     "--eml",
@@ -217,8 +277,8 @@ def _make_progress(disable: bool) -> Progress:
     default=False,
     help="Generate a report folder (articles, script, links) alongside the podcast.",
 )
-def main(
-    config_path: str,
+def run(
+    config_path: str | None,
     eml_path: str | None,
     target_date_str: datetime | None,
     dry_run: bool,
@@ -241,6 +301,7 @@ def main(
     # ------------------------------------------------------------------
     # 1. Load configuration
     # ------------------------------------------------------------------
+    config_path = _resolve_config_path(config_path)
     try:
         cfg = load_config(config_path)
     except ConfigError as exc:
@@ -479,5 +540,199 @@ def main(
             )
 
 
+# ---------------------------------------------------------------------------
+# `config` subgroup
+# ---------------------------------------------------------------------------
+
+@cli.group("config")
+def config_group() -> None:
+    """Manage the tldr-podcast configuration file."""
+
+
+def _load_raw_config() -> dict:
+    """
+    Load the raw YAML config without env-var resolution, or return an empty dict.
+
+    Returns
+    -------
+    dict
+        Parsed YAML content, or ``{}`` if the file does not exist.
+    """
+    if _DEFAULT_CONFIG.exists():
+        raw = yaml.safe_load(_DEFAULT_CONFIG.read_text(encoding="utf-8"))
+        return raw if isinstance(raw, dict) else {}
+    return {}
+
+
+def _prompt(label: str, default: str, **kwargs) -> str:
+    """Thin wrapper around ``click.prompt`` that shows the default inline."""
+    return click.prompt(label, default=default, **kwargs)
+
+
+@config_group.command("init")
+@click.option(
+    "--output",
+    "output_path",
+    default=str(_DEFAULT_CONFIG),
+    show_default=True,
+    help="Where to write the config file.",
+)
+def config_init(output_path: str) -> None:
+    """Interactively create or update the configuration file."""
+    existing = _load_raw_config()
+
+    def _get(section: str, key: str, fallback: str = "") -> str:
+        return str(existing.get(section, {}).get(key, fallback))
+
+    click.echo(f"\nConfiguring tldr-podcast → {output_path}\n")
+    click.echo("Press Enter to keep the current value shown in brackets.\n")
+
+    # ── IMAP ─────────────────────────────────────────────────────────────
+    click.echo("── IMAP ──────────────────────────────────────────────────────")
+    imap_host     = _prompt("IMAP host",                _get("imap", "host", "imap.gmail.com"))
+    imap_port     = _prompt("IMAP port",                _get("imap", "port", "993"))
+    imap_username = _prompt("IMAP username (email)",    _get("imap", "username"))
+    imap_pass_env = _prompt(
+        "Env var for IMAP password",
+        _get("imap", "password_env", "IMAP_PASSWORD"),
+    )
+    imap_folder      = _prompt("IMAP folder to watch",  _get("imap", "folder", "INBOX"))
+    imap_seen_folder = _prompt("Folder for processed emails", _get("imap", "seen_folder", "TLDR/Seen"))
+
+    # ── Gemini ────────────────────────────────────────────────────────────
+    click.echo("\n── Gemini ────────────────────────────────────────────────────")
+    gemini_key_env  = _prompt(
+        "Env var for Gemini API key",
+        _get("gemini", "api_key_env", "GEMINI_API_KEY"),
+    )
+    gemini_text_model = _prompt("Text model",  _get("gemini", "text_model", "gemini-2.0-flash"))
+    gemini_tts_model  = _prompt("TTS model",   _get("gemini", "tts_model", "gemini-2.5-flash-preview-tts"))
+    gemini_language   = _prompt("Podcast language", _get("gemini", "language", "French"))
+    gemini_tier       = _prompt(
+        "Service tier (standard/flex/priority, leave empty for default)",
+        _get("gemini", "service_tier", ""),
+    )
+
+    # ── Speakers ──────────────────────────────────────────────────────────
+    click.echo("\n── Speaker 1 ─────────────────────────────────────────────────")
+    sp1_name  = _prompt("Name",        _get("gemini", "speaker1", {}).get("name", "Alex") if isinstance(_get("gemini", "speaker1", {}), dict) else "Alex")
+    sp1_voice = _prompt(f"Voice ({', '.join(_GEMINI_VOICES)})", _get("gemini", "speaker1", {}).get("voice", "Puck") if isinstance(_get("gemini", "speaker1", {}), dict) else "Puck")
+    sp1_personality = _prompt(
+        "Personality",
+        existing.get("gemini", {}).get("speaker1", {}).get("personality", "enthusiastic, curious, quick to get excited about tech innovations") if isinstance(existing.get("gemini", {}).get("speaker1"), dict) else "enthusiastic, curious, quick to get excited about tech innovations",
+    )
+
+    click.echo("\n── Speaker 2 ─────────────────────────────────────────────────")
+    sp2_name  = _prompt("Name",        existing.get("gemini", {}).get("speaker2", {}).get("name", "Jordan") if isinstance(existing.get("gemini", {}).get("speaker2"), dict) else "Jordan")
+    sp2_voice = _prompt(f"Voice ({', '.join(_GEMINI_VOICES)})", existing.get("gemini", {}).get("speaker2", {}).get("voice", "Charon") if isinstance(existing.get("gemini", {}).get("speaker2"), dict) else "Charon")
+    sp2_personality = _prompt(
+        "Personality",
+        existing.get("gemini", {}).get("speaker2", {}).get("personality", "analytical, mildly skeptical, adds nuance and historical context") if isinstance(existing.get("gemini", {}).get("speaker2"), dict) else "analytical, mildly skeptical, adds nuance and historical context",
+    )
+
+    # ── Output ────────────────────────────────────────────────────────────
+    click.echo("\n── Output ────────────────────────────────────────────────────")
+    output_dir = _prompt("Output directory", _get("output", "directory", "output"))
+    output_fmt = _prompt("Format (mp3/wav)",  _get("output", "format", "mp3"))
+
+    # ── Build config dict ─────────────────────────────────────────────────
+    cfg: dict = {
+        "imap": {
+            "host": imap_host,
+            "port": int(imap_port),
+            "username": imap_username,
+            "password_env": imap_pass_env,
+            "folder": imap_folder,
+            "seen_folder": imap_seen_folder,
+        },
+        "gemini": {
+            "api_key_env": gemini_key_env,
+            "text_model": gemini_text_model,
+            "tts_model": gemini_tts_model,
+            "language": gemini_language,
+            "speaker1": {
+                "name": sp1_name,
+                "voice": sp1_voice,
+                "personality": sp1_personality,
+            },
+            "speaker2": {
+                "name": sp2_name,
+                "voice": sp2_voice,
+                "personality": sp2_personality,
+            },
+        },
+        "scraping": existing.get("scraping", {"max_articles": 15, "timeout_seconds": 10}),
+        "output": {
+            "directory": output_dir,
+            "format": output_fmt,
+        },
+        "pricing": existing.get("pricing", {}),
+    }
+    if gemini_tier.strip():
+        cfg["gemini"]["service_tier"] = gemini_tier.strip()
+
+    # Preserve pricing block from existing config or example if empty
+    if not cfg["pricing"]:
+        example = Path(__file__).parent.parent.parent / "config.example.yaml"
+        if example.exists():
+            example_raw = yaml.safe_load(example.read_text(encoding="utf-8"))
+            cfg["pricing"] = example_raw.get("pricing", {})
+
+    dest = Path(output_path)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text(
+        yaml.dump(cfg, allow_unicode=True, sort_keys=False, default_flow_style=False),
+        encoding="utf-8",
+    )
+    click.echo(f"\nConfiguration written to {dest}")
+
+    # Remind the user to export the env vars
+    click.echo(
+        f"\nMake sure these environment variables are set before running:\n"
+        f"  export {imap_pass_env}=<your IMAP password>\n"
+        f"  export {gemini_key_env}=<your Gemini API key>"
+    )
+
+
+@config_group.command("show")
+@click.option(
+    "--resolve",
+    is_flag=True,
+    default=False,
+    help="Show resolved values (secrets masked).",
+)
+def config_show(resolve: bool) -> None:
+    """Display the current configuration file."""
+    if not _DEFAULT_CONFIG.exists():
+        click.echo(
+            f"No config file found at {_DEFAULT_CONFIG}.\n"
+            "Run `tldr-podcast config init` to create one.",
+            err=True,
+        )
+        sys.exit(1)
+
+    if resolve:
+        try:
+            cfg = load_config(_DEFAULT_CONFIG)
+        except ConfigError as exc:
+            click.echo(f"[ERROR] {exc}", err=True)
+            sys.exit(1)
+
+        def _mask(data):
+            if isinstance(data, dict):
+                return {k: ("***" if any(s in k for s in ("key", "password", "token", "secret")) else _mask(v)) for k, v in data.items()}
+            if isinstance(data, list):
+                return [_mask(i) for i in data]
+            return data
+
+        masked = _mask(cfg)
+        text = yaml.dump(masked, allow_unicode=True, sort_keys=False, default_flow_style=False)
+        console.print(Syntax(text, "yaml", theme="monokai"))
+    else:
+        text = _DEFAULT_CONFIG.read_text(encoding="utf-8")
+        console.print(Syntax(text, "yaml", theme="monokai"))
+        click.echo(f"\n{_DEFAULT_CONFIG}")
+
+
 if __name__ == "__main__":
-    main()
+    cli()
