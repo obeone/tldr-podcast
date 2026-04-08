@@ -50,7 +50,7 @@ from tldr.config import ConfigError, load_config
 from tldr.email_parser import ParseError, parse_emails
 from tldr.imap_client import IMAPError, fetch_unread_emails, move_emails_to_folder
 from tldr.link_extractor import extract_links
-from tldr.llm_summarizer import generate_dialogue, summarize_articles
+from tldr.llm_summarizer import generate_dialogue, rank_articles_by_interest, summarize_articles
 from tldr.report_generator import generate_report
 from tldr.token_tracker import TokenTracker
 from tldr.tts_generator import generate_audio_chunks
@@ -316,6 +316,9 @@ def run(
     output_cfg = cfg.get("output", {})
     pricing_cfg: dict = cfg.get("pricing", {})
 
+    selection_cfg = gemini_cfg.get("selection", {})
+    selection_min_score: float = float(selection_cfg.get("min_score", 5.0))
+
     max_articles: int = scraping_cfg.get("max_articles", 15)
     scrape_timeout: int = scraping_cfg.get("timeout_seconds", 10)
     output_dir: str = output_cfg.get("directory", "output")
@@ -383,16 +386,43 @@ def run(
     if removed:
         logger.info("Deduplication removed %d duplicate article(s).", removed)
 
-    # Truncate to max_articles before sending to LLM to avoid oversized prompts.
-    all_articles = all_articles[:max_articles]
-    logger.info("%d unique article(s) ready for processing.", len(all_articles))
+    logger.info("%d unique article(s) ready for interest ranking.", len(all_articles))
 
     # ------------------------------------------------------------------
-    # 4. Scrape + generate dialogue + TTS
+    # 4. Rank → Scrape → Summarize → Dialogue → TTS
     # ------------------------------------------------------------------
     with _make_progress(disable=no_progress) as progress:
 
-        # 4a. Scraping
+        # 4a. Interest ranking (filters and sorts by apparent interest)
+        rank_task = progress.add_task(
+            f"[cyan]Ranking[/cyan] {len(all_articles)} article(s) by interest…",
+            total=1,
+        )
+        all_articles = rank_articles_by_interest(
+            all_articles,
+            gemini_cfg,
+            min_score=selection_min_score,
+            token_tracker=tracker,
+            progress=progress,
+            task_id=rank_task,
+        )
+        progress.update(
+            rank_task,
+            description=(
+                f"[cyan]Ranked[/cyan]: {len(all_articles)} article(s) kept "
+                f"(min_score={selection_min_score:.0f}) — {tracker.live_line()}"
+            ),
+        )
+
+        if not all_articles:
+            progress.stop()
+            click.echo("No articles scored above the interest threshold. Nothing to do.")
+            sys.exit(0)
+
+        # Truncate to max_articles after ranking.
+        all_articles = all_articles[:max_articles]
+
+        # 4b. Scraping (only the interesting articles)
         scrape_task = progress.add_task(
             f"[cyan]Scraping[/cyan] {len(all_articles)} article(s)…",
             total=len(all_articles),
@@ -405,7 +435,7 @@ def run(
             task_id=scrape_task,
         )
 
-        # 4b. Link extraction (for report and dry-run display)
+        # 4c. Link extraction (for report and dry-run display)
         link_report = None
         if report:
             link_report = extract_links(all_articles)
@@ -420,11 +450,11 @@ def run(
                 len(link_report.other),
             )
 
-        # 4c. Pre-summarization (optional, when summary_model is configured)
+        # 4d. Per-article summarization (optional, when summary_model is configured)
         if gemini_cfg.get("summary_model") and gemini_cfg["summary_model"] != gemini_cfg.get("text_model"):
             summary_task = progress.add_task(
-                "[cyan]Summarizing articles…[/cyan]",
-                total=1,
+                f"[cyan]Summarizing[/cyan] {len(all_articles)} article(s)…",
+                total=len(all_articles),
             )
             all_articles = summarize_articles(
                 all_articles,
@@ -438,7 +468,7 @@ def run(
                 description=f"[cyan]Summarized[/cyan] — {tracker.live_line()}",
             )
 
-        # 4d. Dialogue generation
+        # 4e. Dialogue generation
         llm_task = progress.add_task("[cyan]Generating dialogue…[/cyan]", total=1)
         chunks = generate_dialogue(
             all_articles,
@@ -476,7 +506,7 @@ def run(
                         click.echo()
             sys.exit(0)
 
-        # 4e. TTS synthesis
+        # 4f. TTS synthesis
         tts_task = progress.add_task(
             f"[cyan]TTS synthesis[/cyan] ({len(chunks)} chunk(s))…",
             total=len(chunks),
