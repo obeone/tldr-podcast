@@ -316,18 +316,17 @@ def _parse_rankings(text: str, expected_count: int) -> list[float]:
 def rank_articles_by_interest(
     articles: list,
     gemini_cfg: dict,
-    min_score: float = 5.0,
     token_tracker: "TokenTracker | None" = None,
     progress: "Progress | None" = None,
     task_id: Any = None,
 ) -> list:
     """
-    Score articles by interest using the LLM, then filter and sort.
+    Score articles by interest using the LLM, then sort by descending score.
 
     Sends only titles and summaries (no full text) to a cheap model
     to rate each article's apparent interest on a 1–10 scale.  Articles
-    below *min_score* are dropped.  The remaining articles are returned
-    sorted by descending score.
+    are returned sorted by descending score so the caller can pick the
+    top N.
 
     Parameters
     ----------
@@ -337,8 +336,6 @@ def rank_articles_by_interest(
     gemini_cfg : dict
         Gemini configuration.  Uses ``selection.model`` if present, otherwise
         falls back to ``text_model``.
-    min_score : float, optional
-        Minimum interest score to keep an article, by default 5.0.
     token_tracker : TokenTracker or None, optional
         Records token usage for the ranking call.
     progress : rich.progress.Progress or None, optional
@@ -349,7 +346,8 @@ def rank_articles_by_interest(
     Returns
     -------
     list
-        Filtered and sorted articles with ``interest_score`` populated.
+        All articles sorted by descending interest score, with
+        ``interest_score`` populated.
     """
     if not articles:
         return articles
@@ -408,17 +406,15 @@ def rank_articles_by_interest(
             "Article %d score=%.1f: %s", i, scores[i], article.title[:60],
         )
 
-    kept = [a for a in articles if a.interest_score >= min_score]
-    kept.sort(key=lambda a: a.interest_score, reverse=True)
+    articles.sort(key=lambda a: a.interest_score, reverse=True)
 
     logger.info(
-        "Interest ranking: %d/%d article(s) kept (min_score=%.1f).",
-        len(kept),
-        len(articles),
-        min_score,
+        "Interest ranking complete: top score=%.1f, bottom=%.1f.",
+        articles[0].interest_score if articles else 0,
+        articles[-1].interest_score if articles else 0,
     )
 
-    return kept
+    return articles
 
 
 def _summarize_single_article(

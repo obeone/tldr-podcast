@@ -316,9 +316,6 @@ def run(
     output_cfg = cfg.get("output", {})
     pricing_cfg: dict = cfg.get("pricing", {})
 
-    selection_cfg = gemini_cfg.get("selection", {})
-    selection_min_score: float = float(selection_cfg.get("min_score", 5.0))
-
     max_articles: int = scraping_cfg.get("max_articles", 15)
     scrape_timeout: int = scraping_cfg.get("timeout_seconds", 10)
     output_dir: str = output_cfg.get("directory", "output")
@@ -393,7 +390,7 @@ def run(
     # ------------------------------------------------------------------
     with _make_progress(disable=no_progress) as progress:
 
-        # 4a. Interest ranking (filters and sorts by apparent interest)
+        # 4a. Interest ranking (sorts by apparent interest)
         rank_task = progress.add_task(
             f"[cyan]Ranking[/cyan] {len(all_articles)} article(s) by interest…",
             total=1,
@@ -401,26 +398,19 @@ def run(
         all_articles = rank_articles_by_interest(
             all_articles,
             gemini_cfg,
-            min_score=selection_min_score,
             token_tracker=tracker,
             progress=progress,
             task_id=rank_task,
         )
+
+        # Keep only the top max_articles most interesting.
+        all_articles = all_articles[:max_articles]
         progress.update(
             rank_task,
             description=(
-                f"[cyan]Ranked[/cyan]: {len(all_articles)} article(s) kept "
-                f"(min_score={selection_min_score:.0f}) — {tracker.live_line()}"
+                f"[cyan]Ranked[/cyan]: kept top {len(all_articles)} — {tracker.live_line()}"
             ),
         )
-
-        if not all_articles:
-            progress.stop()
-            click.echo("No articles scored above the interest threshold. Nothing to do.")
-            sys.exit(0)
-
-        # Truncate to max_articles after ranking.
-        all_articles = all_articles[:max_articles]
 
         # 4b. Scraping (only the interesting articles)
         scrape_task = progress.add_task(

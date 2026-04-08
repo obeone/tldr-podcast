@@ -42,14 +42,12 @@ gemini:
     voice: Charon
     personality: "analytical, mildly skeptical, adds nuance and historical context"
   # Interest-based article selection.  Before scraping, titles and summaries
-  # are sent to a cheap model to score each article 1–10.  Only articles
-  # meeting the minimum score are scraped, summarized, and included.
+  # are sent to a cheap model to score each article 1–10.  The top
+  # scraping.max_articles are kept (sorted by descending interest).
   selection:
     # Model used for interest scoring (defaults to text_model if omitted).
     # A lightweight model is recommended since only titles/summaries are sent.
     model: gemini-2.0-flash-lite
-    # Minimum interest score (1–10) to keep an article.
-    min_score: 5
   dialogue:
     min_articles: 8      # minimum articles to cover (default: 8)
     max_articles: 12     # maximum articles to cover (default: 12)

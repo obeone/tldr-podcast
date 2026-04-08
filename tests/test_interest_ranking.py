@@ -136,30 +136,36 @@ class TestParseRankings:
 class TestRankArticlesByInterest:
     """Unit tests for rank_articles_by_interest()."""
 
-    def test_filters_below_threshold(self):
-        """Articles below min_score are excluded."""
-        mock_genai = _mock_genai_response(RANKING_RESPONSE)
-
-        with patch("tldr.llm_summarizer.genai", mock_genai):
-            result = rank_articles_by_interest(
-                list(SAMPLE_ARTICLES), GEMINI_CFG, min_score=5.0,
-            )
-
-        titles = [a.title for a in result]
-        assert "MINOR CSS FRAMEWORK UPDATE" not in titles
-        assert len(result) == 3
-
     def test_sorts_by_descending_score(self):
-        """Kept articles are sorted highest score first."""
+        """Articles are returned sorted highest score first."""
         mock_genai = _mock_genai_response(RANKING_RESPONSE)
 
         with patch("tldr.llm_summarizer.genai", mock_genai):
-            result = rank_articles_by_interest(
-                list(SAMPLE_ARTICLES), GEMINI_CFG, min_score=1.0,
-            )
+            result = rank_articles_by_interest(list(SAMPLE_ARTICLES), GEMINI_CFG)
 
         scores = [a.interest_score for a in result]
         assert scores == sorted(scores, reverse=True)
+
+    def test_highest_scored_articles_come_first(self):
+        """The most interesting articles appear at the top of the list."""
+        mock_genai = _mock_genai_response(RANKING_RESPONSE)
+
+        with patch("tldr.llm_summarizer.genai", mock_genai):
+            result = rank_articles_by_interest(list(SAMPLE_ARTICLES), GEMINI_CFG)
+
+        assert result[0].title in ("GOOGLE LAUNCHES QUANTUM CHIP", "OPENAI RELEASES GPT-5")
+        assert result[-1].title == "MINOR CSS FRAMEWORK UPDATE"
+
+    def test_caller_can_truncate_to_top_n(self):
+        """Caller picks top N from the sorted result (simulates max_articles)."""
+        mock_genai = _mock_genai_response(RANKING_RESPONSE)
+
+        with patch("tldr.llm_summarizer.genai", mock_genai):
+            result = rank_articles_by_interest(list(SAMPLE_ARTICLES), GEMINI_CFG)
+
+        top2 = result[:2]
+        assert len(top2) == 2
+        assert all(a.interest_score >= 9.0 for a in top2)
 
     def test_populates_interest_score(self):
         """Each article's interest_score is set by the ranking."""
@@ -167,19 +173,20 @@ class TestRankArticlesByInterest:
         mock_genai = _mock_genai_response(RANKING_RESPONSE)
 
         with patch("tldr.llm_summarizer.genai", mock_genai):
-            rank_articles_by_interest(articles, GEMINI_CFG, min_score=0.0)
+            result = rank_articles_by_interest(articles, GEMINI_CFG)
 
-        assert articles[0].interest_score == 9.0
-        assert articles[1].interest_score == 3.0
+        scores_by_title = {a.title: a.interest_score for a in result}
+        assert scores_by_title["GOOGLE LAUNCHES QUANTUM CHIP"] == 9.0
+        assert scores_by_title["MINOR CSS FRAMEWORK UPDATE"] == 3.0
+        assert scores_by_title["OPENAI RELEASES GPT-5"] == 9.0
+        assert scores_by_title["NEW RUST LINTER PLUGIN"] == 5.0
 
-    def test_keeps_all_when_threshold_zero(self):
-        """With min_score=0, all articles are kept."""
+    def test_returns_all_articles(self):
+        """All articles are returned (caller decides how many to keep)."""
         mock_genai = _mock_genai_response(RANKING_RESPONSE)
 
         with patch("tldr.llm_summarizer.genai", mock_genai):
-            result = rank_articles_by_interest(
-                list(SAMPLE_ARTICLES), GEMINI_CFG, min_score=0.0,
-            )
+            result = rank_articles_by_interest(list(SAMPLE_ARTICLES), GEMINI_CFG)
 
         assert len(result) == len(SAMPLE_ARTICLES)
 
@@ -188,9 +195,7 @@ class TestRankArticlesByInterest:
         mock_genai = _mock_genai_response("")
 
         with patch("tldr.llm_summarizer.genai", mock_genai):
-            result = rank_articles_by_interest(
-                list(SAMPLE_ARTICLES), GEMINI_CFG, min_score=5.0,
-            )
+            result = rank_articles_by_interest(list(SAMPLE_ARTICLES), GEMINI_CFG)
 
         assert result == list(SAMPLE_ARTICLES)
 

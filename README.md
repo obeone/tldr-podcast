@@ -46,7 +46,7 @@ flowchart TB
 | 🚫 Sponsor filter | Strips `TOGETHER WITH`, `SPONSOR`, ads |
 | 🌐 Article scraping | Full text via trafilatura, fallback to summary |
 | 🔗 Link extraction | Categorises URLs into repos, models, papers, sources |
-| 🎯 Interest ranking | LLM scores articles 1–10 by interest before scraping; only the best are kept (configurable threshold) |
+| 🎯 Interest ranking | LLM scores articles 1–10 by interest before scraping; top `max_articles` are kept |
 | 📝 Per-article summarization | Optional cheap model summarizes each article individually via concurrent API calls |
 | ⚡ Service tiers | Support for `flex` (cheaper) and `priority` (faster) API tiers |
 | 🎙️ Two-voice TTS | Configurable speaker names, voices, and personalities |
@@ -124,7 +124,6 @@ gemini:
   # summary_model: gemini-2.0-flash-lite  # optional per-article summarizer
   selection:
     model: gemini-2.0-flash-lite   # cheap model for interest scoring
-    min_score: 5                   # keep articles scoring ≥ 5 (1–10)
   tts_model: gemini-2.5-flash-preview-tts
   # service_tier: flex          # optional: flex | priority (omit for standard)
   language: French              # dialogue and TTS language
