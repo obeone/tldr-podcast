@@ -147,25 +147,20 @@ class TestRenderScript:
 class TestRenderSummary:
     """_render_summary() should produce categorised Markdown link sections."""
 
-    def test_contains_source_section(self) -> None:
-        """Source articles appear under their heading."""
-        md = _render_summary(_make_link_report())
-        assert "## Source Articles" in md
-
     def test_contains_repo_section(self) -> None:
         """Repositories appear under their heading."""
         md = _render_summary(_make_link_report())
-        assert "## GitHub / GitLab Repositories" in md
+        assert "GitHub / GitLab Repositories" in md
 
     def test_contains_model_section(self) -> None:
         """Models appear under their heading."""
         md = _render_summary(_make_link_report())
-        assert "## Hugging Face Models" in md
+        assert "Hugging Face Models" in md
 
     def test_contains_paper_section(self) -> None:
         """Papers appear under their heading."""
         md = _render_summary(_make_link_report())
-        assert "## Academic Papers" in md
+        assert "Academic Papers" in md
 
     def test_empty_report_shows_message(self) -> None:
         """An empty report shows a 'no links found' message."""
@@ -177,15 +172,46 @@ class TestRenderSummary:
         md = _render_summary(_make_link_report())
         assert "[Test Article](https://github.com/org/repo)" in md
 
-    def test_skips_empty_categories(self) -> None:
-        """Categories with no items are not rendered."""
+    def test_skips_empty_categories_without_articles(self) -> None:
+        """Categories with no items are not rendered (no articles context)."""
         report = LinkReport(
             sources=[CategorisedLink(url="https://x.com", label="X", category="source")],
         )
         md = _render_summary(report)
-        assert "## Source Articles" in md
-        assert "## GitHub" not in md
-        assert "## Hugging Face" not in md
+        assert "GitHub" not in md
+        assert "Hugging Face" not in md
+
+    def test_with_articles_shows_summary(self) -> None:
+        """When articles are passed, the summary text appears."""
+        articles = [_make_article(title="Test Article", summary="This is important.")]
+        md = _render_summary(_make_link_report(), articles=articles)
+        assert "This is important." in md
+
+    def test_with_articles_shows_interest_score(self) -> None:
+        """When articles have an interest score, it appears in the summary."""
+        article = _make_article(title="Test Article")
+        article.interest_score = 8.0
+        md = _render_summary(_make_link_report(), articles=[article])
+        assert "8/10" in md
+
+    def test_with_articles_groups_secondary_links(self) -> None:
+        """Secondary links (repos, papers) appear under their source article."""
+        articles = [_make_article(title="Test Article")]
+        md = _render_summary(_make_link_report(), articles=articles)
+        assert "Repository:" in md
+        assert "github.com/org/repo" in md
+
+    def test_with_articles_shows_article_heading_as_link(self) -> None:
+        """Each source article title is rendered as a Markdown link."""
+        articles = [_make_article(title="Test Article")]
+        md = _render_summary(_make_link_report(), articles=articles)
+        assert "[Test Article](https://example.com/post)" in md
+
+    def test_no_score_shown_when_zero(self) -> None:
+        """Interest score line is omitted when score is 0."""
+        articles = [_make_article(title="Test Article")]
+        md = _render_summary(_make_link_report(), articles=articles)
+        assert "Interest score" not in md
 
 
 # ---------------------------------------------------------------------------

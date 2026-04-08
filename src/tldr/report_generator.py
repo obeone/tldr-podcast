@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from tldr.email_parser import Article
-    from tldr.link_extractor import LinkReport
+    from tldr.link_extractor import CategorisedLink, LinkReport
     from tldr.llm_summarizer import DialogueChunk
 
 logger = logging.getLogger(__name__)
@@ -163,14 +163,24 @@ def _render_script(chunks: list[DialogueChunk]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _render_summary(link_report: LinkReport) -> str:
+def _render_summary(
+    link_report: LinkReport,
+    articles: list[Article] | None = None,
+) -> str:
     """
     Render the synthetic reference sheet as Markdown.
+
+    When *articles* is provided, the summary includes per-article detail
+    blocks with the summary text, interest score (when available), and all
+    links extracted from that article grouped by category.  Without
+    *articles*, falls back to flat categorised link lists.
 
     Parameters
     ----------
     link_report : LinkReport
         Categorised links extracted from the articles.
+    articles : list[Article] or None, optional
+        Parsed articles used to enrich the summary with context.
 
     Returns
     -------
@@ -179,25 +189,96 @@ def _render_summary(link_report: LinkReport) -> str:
     """
     lines: list[str] = ["# Synthetic Summary — Sources & References\n"]
 
-    sections = [
-        ("Source Articles", link_report.sources),
+    if link_report.total == 0:
+        lines.append("*No external links were found in the articles.*\n")
+        return "\n".join(lines) + "\n"
+
+    # Build a title→article lookup for enrichment
+    article_map: dict[str, Article] = {}
+    if articles:
+        for a in articles:
+            article_map[a.title] = a
+
+    # Build a title→secondary links index (non-source links grouped by origin article)
+    links_by_article: dict[str, list[CategorisedLink]] = {}
+    for bucket in (link_report.repos, link_report.models, link_report.papers, link_report.other):
+        for link in bucket:
+            links_by_article.setdefault(link.label, []).append(link)
+
+    # ── Per-article detail section ──────────────────────────────────────
+    if articles:
+        lines.append("## Articles\n")
+        for source_link in link_report.sources:
+            article = article_map.get(source_link.label)
+            lines.append(f"### [{source_link.label}]({source_link.url})\n")
+
+            if article:
+                score = getattr(article, "interest_score", 0.0)
+                if score > 0:
+                    lines.append(f"**Interest score:** {score:.0f}/10\n")
+                summary = article.summary or ""
+                if summary:
+                    lines.append(f"{summary}\n")
+
+            # Secondary links from this article
+            secondary = links_by_article.get(source_link.label, [])
+            if secondary:
+                _CATEGORY_LABELS = {
+                    "repo": "Repository",
+                    "model": "Model",
+                    "paper": "Paper",
+                    "other": "Link",
+                }
+                for link in secondary:
+                    cat_label = _CATEGORY_LABELS.get(link.category, "Link")
+                    lines.append(f"- {cat_label}: [{_url_short_label(link.url)}]({link.url})")
+                lines.append("")
+
+    # ── Flat categorised lists (always included as quick-reference) ─────
+    flat_sections = [
         ("GitHub / GitLab Repositories", link_report.repos),
         ("Hugging Face Models", link_report.models),
         ("Academic Papers", link_report.papers),
         ("Other Links", link_report.other),
     ]
 
-    for heading, items in sections:
-        if not items:
-            continue
-        lines.append(f"\n## {heading}\n")
-        for link in items:
-            lines.append(f"- [{link.label}]({link.url})")
+    has_flat = any(items for _, items in flat_sections)
+    if has_flat:
+        lines.append("\n---\n")
+        lines.append("## All Links by Category\n")
 
-    if link_report.total == 0:
-        lines.append("\n*No external links were found in the articles.*\n")
+        for heading, items in flat_sections:
+            if not items:
+                continue
+            lines.append(f"### {heading}\n")
+            for link in items:
+                lines.append(f"- [{link.label}]({link.url})")
+            lines.append("")
 
     return "\n".join(lines) + "\n"
+
+
+def _url_short_label(url: str) -> str:
+    """
+    Extract a short display label from a URL.
+
+    Returns the domain + path stripped of protocol and trailing slashes.
+
+    Parameters
+    ----------
+    url : str
+        Full URL.
+
+    Returns
+    -------
+    str
+        Shortened label, e.g. ``"github.com/org/repo"``.
+    """
+    label = url.split("://", 1)[-1].rstrip("/")
+    # Trim excessively long paths
+    if len(label) > 80:
+        label = label[:77] + "..."
+    return label
 
 
 def generate_report(
@@ -282,7 +363,7 @@ def generate_report(
     logger.info("Written %s", script_path)
 
     summary_path = report_dir / "summary.md"
-    summary_path.write_text(_render_summary(link_report), encoding="utf-8")
+    summary_path.write_text(_render_summary(link_report, articles=articles), encoding="utf-8")
     logger.info("Written %s", summary_path)
 
     logger.info("Report folder created: %s", report_dir)
