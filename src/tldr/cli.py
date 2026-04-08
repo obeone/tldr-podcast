@@ -15,7 +15,7 @@ Run options
 --dry-run      Print the generated dialogue to stdout instead of calling TTS.
 --no-progress  Disable the rich progress bar.
 --verbose      Enable DEBUG-level logging.
---report       Generate a report folder alongside the podcast.
+--no-report    Disable the report folder generated alongside the podcast.
 """
 
 from __future__ import annotations
@@ -220,7 +220,10 @@ def _resolve_config_path(config_path: str | None) -> str:
 # Top-level group
 # ---------------------------------------------------------------------------
 
-@click.group()
+CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
+
+
+@click.group(context_settings=CONTEXT_SETTINGS)
 def cli() -> None:
     """TLDR Newsletter → Podcast: convert newsletters into two-voice MP3 podcasts."""
 
@@ -231,7 +234,7 @@ def cli() -> None:
 
 @cli.command("run")
 @click.option(
-    "--config",
+    "-c", "--config",
     "config_path",
     required=False,
     default=None,
@@ -239,21 +242,21 @@ def cli() -> None:
     help=f"Path to the YAML configuration file. Defaults to {_DEFAULT_CONFIG}.",
 )
 @click.option(
-    "--eml",
+    "-e", "--eml",
     "eml_path",
     default=None,
     type=click.Path(exists=True, dir_okay=False),
     help="Path to a local .eml file (skips IMAP fetch).",
 )
 @click.option(
-    "--date",
+    "-d", "--date",
     "target_date_str",
     default=None,
     type=click.DateTime(formats=["%Y-%m-%d"]),
     help="Date to process (YYYY-MM-DD). Ignored when --eml is used. Default: today.",
 )
 @click.option(
-    "--dry-run",
+    "-n", "--dry-run",
     is_flag=True,
     default=False,
     help="Print generated dialogue to stdout instead of synthesising audio.",
@@ -266,16 +269,15 @@ def cli() -> None:
     help="Disable the rich progress bar.",
 )
 @click.option(
-    "--verbose",
+    "-v", "--verbose",
     is_flag=True,
     default=False,
     help="Enable DEBUG-level logging.",
 )
 @click.option(
-    "--report",
-    is_flag=True,
-    default=False,
-    help="Generate a report folder (articles, script, links) alongside the podcast.",
+    "-r/-R", "--report/--no-report",
+    default=True,
+    help="Generate a report folder (articles, script, links, overview) alongside the podcast.",
 )
 def run(
     config_path: str | None,
@@ -403,7 +405,7 @@ def run(
             task_id=scrape_task,
         )
 
-        # 4b. Link extraction (when --report is requested)
+        # 4b. Link extraction (for report and dry-run display)
         link_report = None
         if report:
             link_report = extract_links(all_articles)
@@ -502,7 +504,7 @@ def run(
     click.echo(f"Podcast saved to: {saved}")
 
     # ------------------------------------------------------------------
-    # 6. Report folder (when --report is requested)
+    # 6. Report folder (enabled by default, disable with --no-report)
     # ------------------------------------------------------------------
     if link_report is not None:
         report_dir = generate_report(
@@ -511,6 +513,10 @@ def run(
             link_report=link_report,
             output_dir=output_dir,
             timestamp=timestamp,
+            audio_path=saved,
+            token_summary=tracker.summary(),
+            email_count=len(email_data),
+            target_date=target_date,
         )
         click.echo(f"Report folder saved to: {report_dir}")
 
@@ -544,7 +550,7 @@ def run(
 # `config` subgroup
 # ---------------------------------------------------------------------------
 
-@cli.group("config")
+@cli.group("config", context_settings=CONTEXT_SETTINGS)
 def config_group() -> None:
     """Manage the tldr-podcast configuration file."""
 
