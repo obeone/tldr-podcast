@@ -1,9 +1,9 @@
 """
-IMAP client for fetching unread emails from a configured mailbox and marking
+IMAP client for fetching emails from a configured mailbox and marking
 processed messages by moving them to a "seen" folder.
 
 Connects to an IMAP server via SSL, authenticates, selects a folder,
-retrieves the raw RFC 822 bytes for all UNSEEN messages, and optionally
+retrieves the raw RFC 822 bytes for matching messages, and optionally
 moves them to a destination folder once processing is complete.
 """
 
@@ -22,16 +22,18 @@ class IMAPError(Exception):
     """Raised when any IMAP operation fails."""
 
 
-def fetch_unread_emails(
+def fetch_emails(
     imap_cfg: dict[str, Any],
     target_date: date | None = None,
+    status_filter: str = "all",
 ) -> list[tuple[int, bytes]]:
     """
-    Connect to an IMAP server and fetch the raw bytes of all unread messages.
+    Connect to an IMAP server and fetch the raw bytes of matching messages.
 
     Establishes an SSL connection using the provided configuration, logs in,
-    selects the configured folder, searches for UNSEEN messages sent on
-    ``target_date``, and fetches the RFC 822 raw bytes for each one.
+    selects the configured folder, searches for messages sent on
+    ``target_date`` filtered by ``status_filter``, and fetches the RFC 822
+    raw bytes for each one.
 
     All exceptions are caught and re-raised as :exc:`IMAPError`.
 
@@ -49,20 +51,28 @@ def fetch_unread_emails(
     target_date : date or None, optional
         The calendar day to filter by (send date). Defaults to ``date.today()``.
         Uses IMAP ``SENTSINCE``/``SENTBEFORE`` criteria (RFC 3501 date format).
+    status_filter : str, optional
+        Which messages to include based on read status. One of:
+
+        - ``"all"`` (default): fetch all messages regardless of read status.
+        - ``"unseen"``: fetch only unread messages.
+        - ``"seen"``: fetch only read messages.
 
     Returns
     -------
     list[tuple[int, bytes]]
-        A list of ``(message_id, raw_bytes)`` pairs, one entry per unread
+        A list of ``(message_id, raw_bytes)`` pairs, one entry per matching
         message.  ``message_id`` is the IMAP UID used to reference the message
         later (e.g. for moving it).  Returns an empty list when there are no
-        unread messages.
+        matching messages.
 
     Raises
     ------
     IMAPError
         If the connection, login, folder selection, search, or fetch
         operations fail for any reason.
+    ValueError
+        If ``status_filter`` is not one of ``"all"``, ``"unseen"``, ``"seen"``.
 
     Examples
     --------
@@ -73,10 +83,17 @@ def fetch_unread_emails(
     ...     "password": "secret",
     ...     "folder": "INBOX",
     ... }
-    >>> emails = fetch_unread_emails(cfg)  # doctest: +SKIP
+    >>> emails = fetch_emails(cfg)  # doctest: +SKIP
+    >>> emails = fetch_emails(cfg, status_filter="unseen")  # doctest: +SKIP
     >>> from datetime import date
-    >>> emails = fetch_unread_emails(cfg, target_date=date(2026, 2, 20))  # doctest: +SKIP
+    >>> emails = fetch_emails(cfg, target_date=date(2026, 2, 20))  # doctest: +SKIP
     """
+    if status_filter not in ("all", "unseen", "seen"):
+        raise ValueError(
+            f"Invalid status_filter {status_filter!r}; "
+            "expected 'all', 'unseen', or 'seen'."
+        )
+
     if target_date is None:
         target_date = date.today()
 
@@ -99,11 +116,24 @@ def fetch_unread_emails(
             logger.debug("Selecting folder: %s", folder)
             client.select_folder(folder)
 
-            logger.debug("Searching for UNSEEN messages sent on %s", since_str)
-            message_ids = client.search(
-                ["UNSEEN", "SENTSINCE", since_str, "SENTBEFORE", before_str]
+            criteria: list[str] = ["SENTSINCE", since_str, "SENTBEFORE", before_str]
+            if status_filter == "unseen":
+                criteria.insert(0, "UNSEEN")
+            elif status_filter == "seen":
+                criteria.insert(0, "SEEN")
+
+            logger.debug(
+                "Searching for messages sent on %s (filter=%s)",
+                since_str,
+                status_filter,
             )
-            logger.info("Found %d unread message(s) in %s", len(message_ids), folder)
+            message_ids = client.search(criteria)
+            logger.info(
+                "Found %d message(s) in %s (filter=%s)",
+                len(message_ids),
+                folder,
+                status_filter,
+            )
 
             if not message_ids:
                 return []
@@ -137,7 +167,7 @@ def move_emails_to_folder(
     folder, creating the target folder if it does not exist.
 
     Connects to the IMAP server using the same credentials as
-    :func:`fetch_unread_emails`, selects the source folder, copies the
+    :func:`fetch_emails`, selects the source folder, copies the
     messages to ``target_folder``, then deletes and expunges the originals.
     If the server advertises the ``MOVE`` capability the more efficient
     ``MOVE`` command is used instead.
@@ -145,10 +175,10 @@ def move_emails_to_folder(
     Parameters
     ----------
     imap_cfg : dict[str, Any]
-        Same dictionary accepted by :func:`fetch_unread_emails` (``host``,
+        Same dictionary accepted by :func:`fetch_emails` (``host``,
         ``port``, ``username``, ``password``, ``folder``).
     message_ids : list[int]
-        IMAP message IDs to move (as returned by :func:`fetch_unread_emails`).
+        IMAP message IDs to move (as returned by :func:`fetch_emails`).
     target_folder : str
         Destination folder name (e.g. ``"TLDR/Seen"``).
 

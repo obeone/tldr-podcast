@@ -11,7 +11,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from tldr.imap_client import IMAPError, fetch_unread_emails, move_emails_to_folder
+from tldr.imap_client import IMAPError, fetch_emails, move_emails_to_folder
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -88,14 +88,14 @@ def _make_move_mock_client(
 
 
 # ---------------------------------------------------------------------------
-# Tests — fetch_unread_emails
+# Tests — fetch_emails
 # ---------------------------------------------------------------------------
 
-class TestFetchUnreadEmails:
-    """Test suite for fetch_unread_emails."""
+class TestFetchEmails:
+    """Test suite for fetch_emails."""
 
-    def test_returns_id_and_raw_bytes_for_each_unread_message(self):
-        """fetch_unread_emails returns (id, bytes) pairs for each unread message."""
+    def test_returns_id_and_raw_bytes_for_each_message(self):
+        """fetch_emails returns (id, bytes) pairs for each matching message."""
         raw_map = {
             1: {b"RFC822": RAW_EMAIL_1},
             2: {b"RFC822": RAW_EMAIL_2},
@@ -103,7 +103,7 @@ class TestFetchUnreadEmails:
         mock_client = _make_mock_client([1, 2], raw_map)
 
         with patch("tldr.imap_client.IMAPClient", return_value=mock_client):
-            result = fetch_unread_emails(SAMPLE_CFG)
+            result = fetch_emails(SAMPLE_CFG)
 
         assert isinstance(result, list)
         assert len(result) == 2
@@ -114,28 +114,27 @@ class TestFetchUnreadEmails:
         assert RAW_EMAIL_1 in raws
         assert RAW_EMAIL_2 in raws
 
-    def test_returns_empty_list_when_no_unread_messages(self):
-        """fetch_unread_emails returns [] when the folder contains no UNSEEN messages."""
+    def test_returns_empty_list_when_no_messages(self):
+        """fetch_emails returns [] when no messages match."""
         mock_client = _make_mock_client([], {})
 
         with patch("tldr.imap_client.IMAPClient", return_value=mock_client):
-            result = fetch_unread_emails(SAMPLE_CFG)
+            result = fetch_emails(SAMPLE_CFG)
 
         assert result == []
-        # fetch should not have been called at all
         mock_client.fetch.assert_not_called()
 
     def test_raises_imap_error_on_connection_failure(self):
-        """fetch_unread_emails raises IMAPError when the connection fails."""
+        """fetch_emails raises IMAPError when the connection fails."""
         with patch(
             "tldr.imap_client.IMAPClient",
             side_effect=ConnectionRefusedError("Connection refused"),
         ):
             with pytest.raises(IMAPError):
-                fetch_unread_emails(SAMPLE_CFG)
+                fetch_emails(SAMPLE_CFG)
 
     def test_raises_imap_error_on_login_failure(self):
-        """fetch_unread_emails raises IMAPError when authentication fails."""
+        """fetch_emails raises IMAPError when authentication fails."""
         mock_client = MagicMock()
         mock_client.__enter__ = MagicMock(return_value=mock_client)
         mock_client.__exit__ = MagicMock(return_value=False)
@@ -143,10 +142,10 @@ class TestFetchUnreadEmails:
 
         with patch("tldr.imap_client.IMAPClient", return_value=mock_client):
             with pytest.raises(IMAPError):
-                fetch_unread_emails(SAMPLE_CFG)
+                fetch_emails(SAMPLE_CFG)
 
     def test_raises_imap_error_on_search_failure(self):
-        """fetch_unread_emails raises IMAPError when the SEARCH command fails."""
+        """fetch_emails raises IMAPError when the SEARCH command fails."""
         mock_client = MagicMock()
         mock_client.__enter__ = MagicMock(return_value=mock_client)
         mock_client.__exit__ = MagicMock(return_value=False)
@@ -154,28 +153,33 @@ class TestFetchUnreadEmails:
 
         with patch("tldr.imap_client.IMAPClient", return_value=mock_client):
             with pytest.raises(IMAPError):
-                fetch_unread_emails(SAMPLE_CFG)
+                fetch_emails(SAMPLE_CFG)
+
+    def test_raises_value_error_on_invalid_status_filter(self):
+        """fetch_emails raises ValueError for an unknown status_filter."""
+        with pytest.raises(ValueError, match="Invalid status_filter"):
+            fetch_emails(SAMPLE_CFG, status_filter="bogus")
 
 
-class TestFetchUnreadEmailsDateFilter:
+class TestFetchEmailsDateFilter:
     """Tests for the target_date filtering behaviour."""
 
     def test_uses_sentsince_and_before_when_target_date_given(self):
-        """fetch_unread_emails passes SENTSINCE/SENTBEFORE criteria when target_date is set."""
+        """fetch_emails passes SENTSINCE/SENTBEFORE criteria when target_date is set."""
         raw_map = {1: {b"RFC822": RAW_EMAIL_1}}
         mock_client = _make_mock_client([1], raw_map)
         target = date(2026, 2, 20)
 
         with patch("tldr.imap_client.IMAPClient", return_value=mock_client):
-            result = fetch_unread_emails(SAMPLE_CFG, target_date=target)
+            result = fetch_emails(SAMPLE_CFG, target_date=target)
 
         assert result == [(1, RAW_EMAIL_1)]
         mock_client.search.assert_called_once_with(
-            ["UNSEEN", "SENTSINCE", "20-Feb-2026", "SENTBEFORE", "21-Feb-2026"]
+            ["SENTSINCE", "20-Feb-2026", "SENTBEFORE", "21-Feb-2026"]
         )
 
     def test_defaults_to_today_when_no_target_date(self):
-        """fetch_unread_emails defaults target_date to date.today()."""
+        """fetch_emails defaults target_date to date.today()."""
         raw_map = {1: {b"RFC822": RAW_EMAIL_1}}
         mock_client = _make_mock_client([1], raw_map)
         today = date(2026, 2, 22)
@@ -184,10 +188,53 @@ class TestFetchUnreadEmailsDateFilter:
             with patch("tldr.imap_client.date") as mock_date:
                 mock_date.today.return_value = today
                 mock_date.side_effect = lambda *a, **kw: date(*a, **kw)
-                fetch_unread_emails(SAMPLE_CFG)
+                fetch_emails(SAMPLE_CFG)
 
         mock_client.search.assert_called_once_with(
-            ["UNSEEN", "SENTSINCE", "22-Feb-2026", "SENTBEFORE", "23-Feb-2026"]
+            ["SENTSINCE", "22-Feb-2026", "SENTBEFORE", "23-Feb-2026"]
+        )
+
+
+class TestFetchEmailsStatusFilter:
+    """Tests for the status_filter parameter."""
+
+    def test_unseen_filter_adds_unseen_criterion(self):
+        """fetch_emails includes UNSEEN in search criteria when status_filter='unseen'."""
+        raw_map = {1: {b"RFC822": RAW_EMAIL_1}}
+        mock_client = _make_mock_client([1], raw_map)
+        target = date(2026, 2, 20)
+
+        with patch("tldr.imap_client.IMAPClient", return_value=mock_client):
+            fetch_emails(SAMPLE_CFG, target_date=target, status_filter="unseen")
+
+        mock_client.search.assert_called_once_with(
+            ["UNSEEN", "SENTSINCE", "20-Feb-2026", "SENTBEFORE", "21-Feb-2026"]
+        )
+
+    def test_seen_filter_adds_seen_criterion(self):
+        """fetch_emails includes SEEN in search criteria when status_filter='seen'."""
+        raw_map = {1: {b"RFC822": RAW_EMAIL_1}}
+        mock_client = _make_mock_client([1], raw_map)
+        target = date(2026, 2, 20)
+
+        with patch("tldr.imap_client.IMAPClient", return_value=mock_client):
+            fetch_emails(SAMPLE_CFG, target_date=target, status_filter="seen")
+
+        mock_client.search.assert_called_once_with(
+            ["SEEN", "SENTSINCE", "20-Feb-2026", "SENTBEFORE", "21-Feb-2026"]
+        )
+
+    def test_all_filter_uses_no_seen_unseen_criterion(self):
+        """fetch_emails omits SEEN/UNSEEN when status_filter='all'."""
+        raw_map = {1: {b"RFC822": RAW_EMAIL_1}}
+        mock_client = _make_mock_client([1], raw_map)
+        target = date(2026, 2, 20)
+
+        with patch("tldr.imap_client.IMAPClient", return_value=mock_client):
+            fetch_emails(SAMPLE_CFG, target_date=target, status_filter="all")
+
+        mock_client.search.assert_called_once_with(
+            ["SENTSINCE", "20-Feb-2026", "SENTBEFORE", "21-Feb-2026"]
         )
 
 

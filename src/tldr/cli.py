@@ -48,7 +48,7 @@ from rich.syntax import Syntax
 from tldr.audio_exporter import export_audio
 from tldr.config import ConfigError, load_config
 from tldr.email_parser import ParseError, parse_emails
-from tldr.imap_client import IMAPError, fetch_unread_emails, move_emails_to_folder
+from tldr.imap_client import IMAPError, fetch_emails, move_emails_to_folder
 from tldr.link_extractor import extract_links
 from tldr.llm_summarizer import generate_dialogue, rank_articles_by_interest
 from tldr.report_generator import generate_report
@@ -132,7 +132,7 @@ def _sort_emails_by_date(
     ----------
     email_data : list[tuple[int, bytes]]
         List of ``(message_id, raw_bytes)`` pairs as returned by
-        :func:`~tldr.imap_client.fetch_unread_emails`.
+        :func:`~tldr.imap_client.fetch_emails`.
 
     Returns
     -------
@@ -183,6 +183,108 @@ def _make_progress(disable: bool) -> Progress:
         console=console,
         disable=disable,
     )
+
+
+def _extract_email_subject(raw: bytes) -> str:
+    """
+    Extract the Subject header from raw email bytes.
+
+    Parameters
+    ----------
+    raw : bytes
+        Raw RFC 822 bytes for a single email message.
+
+    Returns
+    -------
+    str
+        The decoded subject, or ``"(no subject)"`` if missing.
+    """
+    try:
+        msg = message_from_bytes(raw)
+        subject = msg.get("Subject", "(no subject)")
+        # Decode encoded headers (RFC 2047).
+        from email.header import decode_header
+        parts = decode_header(subject)
+        decoded = ""
+        for part, charset in parts:
+            if isinstance(part, bytes):
+                decoded += part.decode(charset or "utf-8", errors="replace")
+            else:
+                decoded += part
+        return decoded.strip() or "(no subject)"
+    except Exception:
+        return "(no subject)"
+
+
+def _select_emails_interactive(
+    email_data: list[tuple[int, bytes]],
+) -> list[tuple[int, bytes]]:
+    """
+    Prompt the user to select which emails to process when multiple are found.
+
+    Displays a numbered list with subject and date, then asks the user to
+    pick one or more entries. Accepts comma-separated numbers, ranges
+    (e.g. ``1-3``), or ``*`` / ``all`` to select everything.
+
+    Parameters
+    ----------
+    email_data : list[tuple[int, bytes]]
+        Pre-sorted list of ``(message_id, raw_bytes)`` pairs.
+
+    Returns
+    -------
+    list[tuple[int, bytes]]
+        The subset selected by the user.
+    """
+    click.echo(f"\nFound {len(email_data)} email(s) for this date:\n")
+    for idx, (_, raw) in enumerate(email_data, start=1):
+        subject = _extract_email_subject(raw)
+        try:
+            msg = message_from_bytes(raw)
+            dt = parsedate_to_datetime(msg["Date"])
+            date_str = dt.strftime("%Y-%m-%d %H:%M")
+        except Exception:
+            date_str = "unknown date"
+        click.echo(f"  [{idx}] {subject}  ({date_str})")
+
+    click.echo()
+    raw_input = click.prompt(
+        "Select email(s) to process (e.g. 1,3 or 1-3 or * for all)",
+        default="*",
+    )
+    raw_input = raw_input.strip()
+
+    if raw_input in ("*", "all"):
+        return email_data
+
+    selected_indices: set[int] = set()
+    for part in raw_input.split(","):
+        part = part.strip()
+        if "-" in part:
+            try:
+                start, end = part.split("-", 1)
+                for i in range(int(start), int(end) + 1):
+                    selected_indices.add(i)
+            except ValueError:
+                click.echo(f"  Warning: ignoring invalid range '{part}'", err=True)
+        else:
+            try:
+                selected_indices.add(int(part))
+            except ValueError:
+                click.echo(f"  Warning: ignoring invalid input '{part}'", err=True)
+
+    result = [
+        email_data[i - 1]
+        for i in sorted(selected_indices)
+        if 1 <= i <= len(email_data)
+    ]
+
+    if not result:
+        click.echo("No valid selection. Aborting.")
+        sys.exit(0)
+
+    click.echo(f"  → {len(result)} email(s) selected.\n")
+    return result
 
 
 def _resolve_config_path(config_path: str | None) -> str:
@@ -279,6 +381,14 @@ def cli() -> None:
     default=True,
     help="Generate a report folder (articles, script, links, overview) alongside the podcast.",
 )
+@click.option(
+    "-s", "--status",
+    "status_filter",
+    type=click.Choice(["all", "unseen", "seen"], case_sensitive=False),
+    default="all",
+    show_default=True,
+    help="Filter emails by read status.",
+)
 def run(
     config_path: str | None,
     eml_path: str | None,
@@ -287,6 +397,7 @@ def run(
     no_progress: bool,
     verbose: bool,
     report: bool,
+    status_filter: str,
 ) -> None:
     """Convert TLDR newsletter emails into a single two-voice podcast MP3."""
     load_dotenv()
@@ -342,25 +453,37 @@ def run(
         logger.info("Reading local .eml file: %s", eml_path)
         email_data = [(0, Path(eml_path).read_bytes())]
     else:
-        logger.info("Fetching unread emails for %s via IMAP…", target_date)
+        logger.info(
+            "Fetching emails for %s via IMAP (status=%s)…",
+            target_date,
+            status_filter,
+        )
         try:
-            email_data = fetch_unread_emails(imap_cfg, target_date=target_date)
+            email_data = fetch_emails(
+                imap_cfg,
+                target_date=target_date,
+                status_filter=status_filter,
+            )
         except IMAPError as exc:
             click.echo(f"[ERROR] IMAP error: {exc}", err=True)
             sys.exit(1)
 
         if not email_data:
             click.echo(
-                f"No unread TLDR emails found for {target_date}. Nothing to do."
+                f"No TLDR emails found for {target_date} (status={status_filter}). Nothing to do."
             )
             sys.exit(0)
+
+        email_data = _sort_emails_by_date(email_data)
+
+        if len(email_data) > 1:
+            email_data = _select_emails_interactive(email_data)
 
         imap_message_ids = [msg_id for msg_id, _ in email_data]
 
     # ------------------------------------------------------------------
     # 3. Parse all emails → merge → deduplicate
     # ------------------------------------------------------------------
-    email_data = _sort_emails_by_date(email_data)
     all_articles: list = []
 
     for i, (_, raw) in enumerate(email_data, start=1):
