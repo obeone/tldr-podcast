@@ -92,16 +92,19 @@ uv sync && uv pip install -e .
 
 ## ⚙️ Configuration
 
-Bootstrap with the interactive wizard:
+The default configuration file is `~/.config/tldr/config.yaml`.
+
+Run the interactive wizard to create it — it guides you through each
+setting and writes the file in the right place:
 
 ```bash
 tldr-podcast config init
 ```
 
-Or copy the example and fill in your values manually:
+Alternatively, copy the example and edit manually:
 
 ```bash
-cp config.example.yaml config.yaml
+cp config.example.yaml ~/.config/tldr/config.yaml
 ```
 
 ```yaml
@@ -189,15 +192,18 @@ export IMAP_PASSWORD="your-password"
 
 ### CLI Commands
 
+All `run` commands use `~/.config/tldr/config.yaml` by default. Pass
+`--config path/to/config.yaml` to override.
+
 | Command | Description |
 | --- | --- |
-| `tldr-podcast run --config config.yaml` | Fetch unread emails via IMAP and generate podcast |
-| `tldr-podcast run --config config.yaml --eml file.eml` | Use a local `.eml` file |
-| `tldr-podcast run --config config.yaml --date 2026-03-15` | Target a specific date |
-| `tldr-podcast run --config config.yaml --eml file.eml --dry-run` | Print dialogue only, no TTS |
-| `tldr-podcast run --config config.yaml --report` | Generate report folder alongside podcast |
-| `tldr-podcast run --config config.yaml --no-progress` | Disable rich progress bar |
-| `tldr-podcast run --config config.yaml --verbose` | Enable DEBUG logging |
+| `tldr-podcast run` | Fetch unread emails via IMAP and generate podcast |
+| `tldr-podcast run --eml file.eml` | Use a local `.eml` file |
+| `tldr-podcast run --date 2026-03-15` | Target a specific date |
+| `tldr-podcast run --eml file.eml --dry-run` | Print dialogue only, no TTS |
+| `tldr-podcast run --report` | Generate report folder alongside podcast |
+| `tldr-podcast run --no-progress` | Disable rich progress bar |
+| `tldr-podcast run --verbose` | Enable DEBUG logging |
 | `tldr-podcast config init` | Interactive configuration wizard |
 | `tldr-podcast config show` | Display the current configuration |
 | `tldr-podcast config show --resolve` | Display config with resolved env vars (masked) |
@@ -205,16 +211,13 @@ export IMAP_PASSWORD="your-password"
 ### Example — dry-run on a saved email
 
 ```bash
-tldr-podcast run \
-  --config config.yaml \
-  --eml "mails/Gemini 3.1 Pro.eml" \
-  --dry-run
+tldr-podcast run --eml "mails/Gemini 3.1 Pro.eml" --dry-run
 ```
 
 ### Example — full pipeline with report
 
 ```bash
-tldr-podcast run --config config.yaml --eml "mails/newsletter.eml" --report
+tldr-podcast run --eml "mails/newsletter.eml" --report
 # → output/tldr_2026-02-22_1430.mp3
 # → output/tldr_2026-02-22_1430/articles.md
 # → output/tldr_2026-02-22_1430/script.md

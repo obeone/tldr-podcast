@@ -13,10 +13,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 uv tool install .
 
 # Run the CLI (local .eml file, dry-run)
-tldr-podcast --config config.yaml --eml "mails/newsletter.eml" --dry-run
+tldr-podcast run --eml "mails/newsletter.eml" --dry-run
 
 # Run the full pipeline (IMAP fetch)
-tldr-podcast --config config.yaml
+tldr-podcast run
 
 # Dev mode (editable install)
 uv sync && uv pip install -e .
@@ -52,7 +52,7 @@ IMAP / .eml → email_parser → web_scraper → llm_summarizer → tts_generato
 - `tts_generator.py` — Calls Gemini multi-speaker TTS for each `DialogueChunk`; returns raw PCM bytes (24 kHz, mono, 16-bit LE).
 - `audio_exporter.py` — Concatenates PCM chunks and encodes to MP3 or WAV via pydub + ffmpeg.
 
-**`cli.py`** — Click CLI entry point; orchestrates the full pipeline. Installed as the `tldr-podcast` command via `[project.scripts]`.
+**`cli.py`** — Click CLI entry point (group with `run` and `config` subcommands); orchestrates the full pipeline. Installed as the `tldr-podcast` command via `[project.scripts]`.
 
 ## Key Data Types
 
@@ -61,11 +61,11 @@ IMAP / .eml → email_parser → web_scraper → llm_summarizer → tts_generato
 
 ## Configuration
 
-Copy `config.example.yaml` to `config.yaml`. Secrets are never stored directly — use `_env`-suffixed keys that reference environment variable names. Required env vars: `GEMINI_API_KEY`, `IMAP_PASSWORD`.
+Default config path is `~/.config/tldr/config.yaml`. Run `tldr-podcast config init` to create it interactively. Secrets are never stored directly — use `_env`-suffixed keys that reference environment variable names. Required env vars: `GEMINI_API_KEY`, `IMAP_PASSWORD`.
 
 ## Testing
 
-All tests use mocks for external APIs (Gemini, IMAP, HTTP). Sample `.eml` files in `mails/` are used by integration-style tests for the parser. 57 unit tests total.
+All tests use mocks for external APIs (Gemini, IMAP, HTTP). Sample `.eml` files in `mails/` are used by integration-style tests for the parser. 156 unit tests across 13 files.
 
 ## Dependencies
 
