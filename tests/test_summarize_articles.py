@@ -1,4 +1,4 @@
-"""Tests for the summarize_articles() and _parse_summaries() functions."""
+"""Tests for the summarize_articles() per-article summarization."""
 
 from __future__ import annotations
 
@@ -56,11 +56,8 @@ SAMPLE_ARTICLES = [
     ),
 ]
 
-SUMMARY_RESPONSE = """\
-[1] Rust 2.0 brings major borrow checker improvements and new safety features.
-
-[2] Python 3.14 adds advanced pattern matching, making code more expressive.
-"""
+# Per-article mode: the LLM returns plain summary text (no [N] prefix).
+SUMMARY_RESPONSE = "Concise LLM-generated summary of the article."
 
 
 def _mock_genai_response(text):
@@ -83,17 +80,17 @@ def _mock_genai_response(text):
 
 
 class TestSummarizeArticles:
-    """Tests for summarize_articles()."""
+    """Tests for summarize_articles() (per-article mode)."""
 
     def test_replaces_full_text_with_summaries(self):
-        """Articles' full_text should be replaced with LLM-generated summaries."""
+        """Each article's full_text is replaced with the LLM-generated summary."""
         mock_genai = _mock_genai_response(SUMMARY_RESPONSE)
 
         with patch("tldr.llm_summarizer.genai", mock_genai):
             result = summarize_articles(SAMPLE_ARTICLES, GEMINI_CFG_WITH_SUMMARY)
 
-        assert "borrow checker improvements" in result[0].full_text
-        assert "pattern matching" in result[1].full_text
+        for article in result:
+            assert article.full_text == SUMMARY_RESPONSE
 
     def test_uses_summary_model_not_text_model(self):
         """The API must be called with the summary_model, not text_model."""
@@ -131,8 +128,8 @@ class TestSummarizeArticles:
         assert result[0].full_text == "original"
         mock_genai.Client.return_value.models.generate_content.assert_not_called()
 
-    def test_records_token_usage(self):
-        """Token usage must be recorded when a tracker is provided."""
+    def test_records_token_usage_per_article(self):
+        """Token usage is recorded once per article (one call each)."""
         from tldr.token_tracker import TokenTracker
 
         mock_genai = _mock_genai_response(SUMMARY_RESPONSE)
@@ -143,7 +140,16 @@ class TestSummarizeArticles:
                 SAMPLE_ARTICLES, GEMINI_CFG_WITH_SUMMARY, token_tracker=tracker,
             )
 
-        assert tracker._usage["gemini-2.0-flash-lite"].calls == 1
+        assert tracker._usage["gemini-2.0-flash-lite"].calls == len(SAMPLE_ARTICLES)
+
+    def test_makes_one_api_call_per_article(self):
+        """Each article triggers exactly one API call."""
+        mock_genai = _mock_genai_response(SUMMARY_RESPONSE)
+
+        with patch("tldr.llm_summarizer.genai", mock_genai):
+            summarize_articles(SAMPLE_ARTICLES, GEMINI_CFG_WITH_SUMMARY)
+
+        assert mock_genai.Client.return_value.models.generate_content.call_count == len(SAMPLE_ARTICLES)
 
     def test_keeps_original_on_empty_response(self):
         """If the LLM returns empty text, articles keep their original full_text."""
@@ -156,37 +162,3 @@ class TestSummarizeArticles:
             result = summarize_articles(articles, GEMINI_CFG_WITH_SUMMARY)
 
         assert result[0].full_text == "original"
-
-
-class TestParseSummaries:
-    """Tests for _parse_summaries()."""
-
-    def test_parses_numbered_blocks(self):
-        from tldr.llm_summarizer import _parse_summaries
-
-        text = "[1] First summary.\n\n[2] Second summary."
-        result = _parse_summaries(text, 2)
-
-        assert len(result) == 2
-        assert result[0] == "First summary."
-        assert result[1] == "Second summary."
-
-    def test_missing_entries_are_empty(self):
-        from tldr.llm_summarizer import _parse_summaries
-
-        text = "[1] Only first."
-        result = _parse_summaries(text, 3)
-
-        assert len(result) == 3
-        assert result[0] == "Only first."
-        assert result[1] == ""
-        assert result[2] == ""
-
-    def test_out_of_range_indices_ignored(self):
-        from tldr.llm_summarizer import _parse_summaries
-
-        text = "[1] Valid.\n\n[99] Out of range."
-        result = _parse_summaries(text, 2)
-
-        assert result[0] == "Valid."
-        assert result[1] == ""
