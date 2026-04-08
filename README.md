@@ -55,6 +55,7 @@ flowchart TB
 | 🔍 Dry-run mode | Print dialogue without calling TTS |
 | 📂 Local .eml mode | Test with a saved email, no IMAP required |
 | 🔄 Retry logic | Automatic retry with backoff for transient API failures |
+| 🛠️ Config wizard | Interactive `config init` to bootstrap your configuration |
 
 ---
 
@@ -80,16 +81,24 @@ brew install ffmpeg
 git clone <repo-url> tldr-podcast
 cd tldr-podcast
 
-# Create virtual environment and install dependencies
-uv sync
-uv pip install -e .
+# Install as a CLI tool
+uv tool install .
+
+# Or for development (editable install)
+uv sync && uv pip install -e .
 ```
 
 ---
 
 ## ⚙️ Configuration
 
-Copy the example and fill in your values:
+Bootstrap with the interactive wizard:
+
+```bash
+tldr-podcast config init
+```
+
+Or copy the example and fill in your values manually:
 
 ```bash
 cp config.example.yaml config.yaml
@@ -114,19 +123,19 @@ gemini:
   speaker1:
     name: Alex
     voice: Puck
-    personality: "curious, enthusiastic"
+    personality: "enthusiastic, curious, quick to get excited about tech innovations"
   speaker2:
     name: Jordan
     voice: Charon
-    personality: "analytical, witty"
+    personality: "analytical, mildly skeptical, adds nuance and historical context"
   dialogue:
     min_articles: 8
     max_articles: 12
-    target_word_count: 3000
+    target_word_count: 1200
   tts_style:
-    pace: "natural conversational pace"
-    scene: "two hosts in a podcast studio"
-    temperature: 1.0             # expressiveness (0.0–2.0)
+    pace: "slow and deliberate"
+    scene: "Two friends co-hosting a casual French tech podcast in a cozy studio"
+    temperature: 1.2             # expressiveness (0.0–2.0)
 
 scraping:
   max_articles: 15
@@ -137,12 +146,24 @@ output:
   format: mp3                    # mp3 or wav
 
 pricing:                         # USD per 1M tokens (for cost tracking)
+  # Flat format (no tiers):
   gemini-2.0-flash:
-    input: 0.10
-    output: 0.40
+    input_per_1m: 0.10
+    output_per_1m: 0.40
+  # Tier-aware format:
+  gemini-2.5-flash:
+    standard:
+      input_per_1m: 0.30
+      output_per_1m: 2.50
+    flex:
+      input_per_1m: 0.15
+      output_per_1m: 1.25
+    priority:
+      input_per_1m: 0.54
+      output_per_1m: 4.50
   gemini-2.5-flash-preview-tts:
-    input: 0.15
-    output: 0.60
+    input_per_1m: 0.50
+    output_per_1m: 10.00
 ```
 
 Keys ending in `_env` reference environment variable **names** — the actual
@@ -166,20 +187,25 @@ export IMAP_PASSWORD="your-password"
 
 ## 🚀 Usage
 
+### CLI Commands
+
 | Command | Description |
 | --- | --- |
-| `python main.py --config config.yaml` | Fetch unread emails via IMAP and generate podcast |
-| `python main.py --config config.yaml --eml file.eml` | Use a local `.eml` file |
-| `python main.py --config config.yaml --date 2026-03-15` | Target a specific date |
-| `python main.py --config config.yaml --eml file.eml --dry-run` | Print dialogue only, no TTS |
-| `python main.py --config config.yaml --report` | Generate report folder alongside podcast |
-| `python main.py --config config.yaml --no-progress` | Disable rich progress bar |
-| `python main.py --config config.yaml --verbose` | Enable DEBUG logging |
+| `tldr-podcast run --config config.yaml` | Fetch unread emails via IMAP and generate podcast |
+| `tldr-podcast run --config config.yaml --eml file.eml` | Use a local `.eml` file |
+| `tldr-podcast run --config config.yaml --date 2026-03-15` | Target a specific date |
+| `tldr-podcast run --config config.yaml --eml file.eml --dry-run` | Print dialogue only, no TTS |
+| `tldr-podcast run --config config.yaml --report` | Generate report folder alongside podcast |
+| `tldr-podcast run --config config.yaml --no-progress` | Disable rich progress bar |
+| `tldr-podcast run --config config.yaml --verbose` | Enable DEBUG logging |
+| `tldr-podcast config init` | Interactive configuration wizard |
+| `tldr-podcast config show` | Display the current configuration |
+| `tldr-podcast config show --resolve` | Display config with resolved env vars (masked) |
 
 ### Example — dry-run on a saved email
 
 ```bash
-python main.py \
+tldr-podcast run \
   --config config.yaml \
   --eml "mails/Gemini 3.1 Pro.eml" \
   --dry-run
@@ -188,7 +214,7 @@ python main.py \
 ### Example — full pipeline with report
 
 ```bash
-python main.py --config config.yaml --eml "mails/newsletter.eml" --report
+tldr-podcast run --config config.yaml --eml "mails/newsletter.eml" --report
 # → output/tldr_2026-02-22_1430.mp3
 # → output/tldr_2026-02-22_1430/articles.md
 # → output/tldr_2026-02-22_1430/script.md
@@ -211,10 +237,10 @@ uv run pytest tests/ -v
 
 ```text
 tldr-podcast/
-├── main.py                    # Click CLI entry point
 ├── config.example.yaml        # Documented configuration template
 ├── pyproject.toml
 ├── src/tldr/
+│   ├── cli.py                 # Click CLI entry point (group with subcommands)
 │   ├── config.py              # YAML loader with *_env resolution
 │   ├── imap_client.py         # IMAP SSL client
 │   ├── email_parser.py        # MIME parser → Article dataclass list
@@ -241,6 +267,8 @@ tldr-podcast/
 - Sponsor sections (`TOGETHER WITH`, `SPONSOR`, etc.) are filtered out
   before article selection.
 - Token costs are tracked live and displayed at the end of each run.
+- Pricing supports both flat and tier-aware formats — the active tier is
+  selected by `gemini.service_tier` in your config.
 
 ---
 
