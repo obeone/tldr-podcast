@@ -15,8 +15,11 @@ uv tool install .
 # Run the CLI (local .eml file, dry-run)
 tldr-podcast run --eml "mails/newsletter.eml" --dry-run
 
-# Run the full pipeline (IMAP fetch)
+# Run the full pipeline (IMAP fetch, all emails)
 tldr-podcast run
+
+# Only process unread emails
+tldr-podcast run -s unseen
 
 # Dev mode (editable install)
 uv sync && uv pip install -e .
@@ -45,14 +48,14 @@ IMAP / .eml → email_parser → interest_ranking → web_scraper → llm_dialog
 **`src/tldr/` modules:**
 
 - `config.py` — Loads `config.yaml` via `load_config()`. Keys ending in `_env` are replaced at runtime by the named environment variable value (e.g. `api_key_env: GEMINI_API_KEY` becomes `api_key: <value of $GEMINI_API_KEY>`).
-- `imap_client.py` — Fetches unread emails over IMAP SSL; returns `list[bytes]`.
+- `imap_client.py` — Fetches emails over IMAP SSL with status filtering (all/unseen/seen); returns `list[bytes]`.
 - `email_parser.py` — Parses raw MIME bytes into `Article` dataclasses. Strips sponsor sections (`TOGETHER WITH`, `SPONSOR`, etc.) using regex. Resolves article URLs from the "Links:" footer block.
 - `web_scraper.py` — Fetches full article text via trafilatura; falls back to the email summary if scraping fails. Populates `Article.full_text`.
 - `llm_summarizer.py` — Two-stage LLM module: (1) `rank_articles_by_interest()` scores articles 1–10 by title+summary to select the most interesting before scraping; (2) `generate_dialogue()` produces a two-host dialogue script from full article text, split into `DialogueChunk` objects bounded to ≤3000 UTF-8 bytes each.
 - `tts_generator.py` — Calls Gemini multi-speaker TTS for each `DialogueChunk`; returns raw PCM bytes (24 kHz, mono, 16-bit LE).
 - `audio_exporter.py` — Concatenates PCM chunks and encodes to MP3 or WAV via pydub + ffmpeg.
 
-**`cli.py`** — Click CLI entry point (group with `run` and `config` subcommands); orchestrates the full pipeline. Installed as the `tldr-podcast` command via `[project.scripts]`. All commands support `-h` for help. Short flags: `-c` config, `-e` eml, `-d` date, `-n` dry-run, `-v` verbose, `-r`/`-R` report/no-report. Report generation is enabled by default.
+**`cli.py`** — Click CLI entry point (group with `run` and `config` subcommands); orchestrates the full pipeline. Installed as the `tldr-podcast` command via `[project.scripts]`. All commands support `-h` for help. Short flags: `-c` config, `-e` eml, `-d` date, `-s` status, `-n` dry-run, `-v` verbose, `-r`/`-R` report/no-report. Report generation is enabled by default. When multiple emails are found for a date, an interactive selector is displayed.
 
 ## Key Data Types
 

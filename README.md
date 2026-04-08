@@ -39,8 +39,10 @@ flowchart TB
 
 | Feature | Details |
 | --- | --- |
-| 📬 IMAP fetch | Retrieves unread TLDR emails via SSL, moves processed emails to a configurable folder |
+| 📬 IMAP fetch | Retrieves TLDR emails via SSL (all/unseen/seen), moves processed emails to a configurable folder |
 | 📅 Date filter | Deduplicates emails per day with `--date YYYY-MM-DD` |
+| 🗂️ Email selection | Interactive picker when multiple emails match — choose which to include |
+| 🔖 Status filter | `--status all\|unseen\|seen` to filter by read status (default: all) |
 | 🚫 Sponsor filter | Strips `TOGETHER WITH`, `SPONSOR`, ads |
 | 🌐 Article scraping | Full text via trafilatura, fallback to summary |
 | 🔗 Link extraction | Categorises URLs into repos, models, papers, sources |
@@ -198,7 +200,9 @@ All `run` commands use `~/.config/tldr/config.yaml` by default. Pass
 
 | Command | Description |
 | --- | --- |
-| `tldr-podcast run` | Fetch unread emails via IMAP and generate podcast + report |
+| `tldr-podcast run` | Fetch emails via IMAP and generate podcast + report |
+| `tldr-podcast run -s unseen` | Only process unread emails |
+| `tldr-podcast run -s seen` | Only process already-read emails |
 | `tldr-podcast run -e file.eml` | Use a local `.eml` file |
 | `tldr-podcast run -d 2026-03-15` | Target a specific date |
 | `tldr-podcast run -e file.eml -n` | Print dialogue only, no TTS (dry-run) |
@@ -209,7 +213,7 @@ All `run` commands use `~/.config/tldr/config.yaml` by default. Pass
 | `tldr-podcast config show` | Display the current configuration |
 | `tldr-podcast config show --resolve` | Display config with resolved env vars (masked) |
 
-**Short flags:** `-c` config, `-e` eml, `-d` date, `-n` dry-run, `-v` verbose, `-r`/`-R` report/no-report, `-h` help.
+**Short flags:** `-c` config, `-e` eml, `-d` date, `-s` status, `-n` dry-run, `-v` verbose, `-r`/`-R` report/no-report, `-h` help.
 
 ### Example — dry-run on a saved email
 
