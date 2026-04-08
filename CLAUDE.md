@@ -52,7 +52,7 @@ IMAP / .eml → email_parser → web_scraper → llm_summarizer → tts_generato
 - `tts_generator.py` — Calls Gemini multi-speaker TTS for each `DialogueChunk`; returns raw PCM bytes (24 kHz, mono, 16-bit LE).
 - `audio_exporter.py` — Concatenates PCM chunks and encodes to MP3 or WAV via pydub + ffmpeg.
 
-**`cli.py`** — Click CLI entry point (group with `run` and `config` subcommands); orchestrates the full pipeline. Installed as the `tldr-podcast` command via `[project.scripts]`.
+**`cli.py`** — Click CLI entry point (group with `run` and `config` subcommands); orchestrates the full pipeline. Installed as the `tldr-podcast` command via `[project.scripts]`. All commands support `-h` for help. Short flags: `-c` config, `-e` eml, `-d` date, `-n` dry-run, `-v` verbose, `-r`/`-R` report/no-report. Report generation is enabled by default.
 
 ## Key Data Types
 
@@ -65,7 +65,7 @@ Default config path is `~/.config/tldr/config.yaml`. Run `tldr-podcast config in
 
 ## Testing
 
-All tests use mocks for external APIs (Gemini, IMAP, HTTP). Sample `.eml` files in `mails/` are used by integration-style tests for the parser. 156 unit tests across 13 files.
+All tests use mocks for external APIs (Gemini, IMAP, HTTP). Sample `.eml` files in `mails/` are used by integration-style tests for the parser. 168 unit tests across 13 files.
 
 ## Dependencies
 
