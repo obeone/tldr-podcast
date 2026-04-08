@@ -3,7 +3,7 @@
 ![Python](https://img.shields.io/badge/Python-3.13+-blue?logo=python&logoColor=white)
 ![Gemini](https://img.shields.io/badge/Gemini-Flash%20%7C%20TTS-4285F4?logo=google&logoColor=white)
 ![ffmpeg](https://img.shields.io/badge/ffmpeg-required-green?logo=ffmpeg&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-168%20passed-brightgreen)
+![Tests](https://img.shields.io/badge/tests-176%20passed-brightgreen)
 
 Converts TLDR newsletters into a two-voice podcast MP3 using Gemini AI.
 
@@ -14,14 +14,16 @@ Converts TLDR newsletters into a two-voice podcast MP3 using Gemini AI.
 ```mermaid
 flowchart TB
     IN[📧 IMAP / .eml file] --> EP[Email Parser<br>sponsor filter]
-    EP --> WS[Web Scraper<br>trafilatura]
+    EP --> RANK[Interest Ranking<br>LLM scores 1–10]
 
-    WS --> SUM[Pre-Summarizer<br>cheap model · optional]
+    RANK --> WS[Web Scraper<br>trafilatura]
+
+    WS --> SUM[Per-Article Summarizer<br>concurrent · optional]
     WS --> LE[Link Extractor<br>repos · models · papers]
 
     SUM --> LLM[Script Writer<br>Gemini Flash]
 
-    LLM --> DC[Dialogue chunks<br>≤ 3 800 bytes]
+    LLM --> DC[Dialogue chunks<br>≤ 3 000 bytes]
 
     DC --> TTS[TTS Generator<br>Gemini multi-speaker]
     DC --> RPT[📊 Report Generator]
@@ -44,8 +46,8 @@ flowchart TB
 | 🚫 Sponsor filter | Strips `TOGETHER WITH`, `SPONSOR`, ads |
 | 🌐 Article scraping | Full text via trafilatura, fallback to summary |
 | 🔗 Link extraction | Categorises URLs into repos, models, papers, sources |
-| 🤖 AI curation | Gemini Flash selects 8-12 interesting stories (configurable) |
-| 📝 Pre-summarization | Optional cheap model summarizes articles before script writing |
+| 🎯 Interest ranking | LLM scores articles 1–10 by interest before scraping; only the best are kept (configurable threshold) |
+| 📝 Per-article summarization | Optional cheap model summarizes each article individually via concurrent API calls |
 | ⚡ Service tiers | Support for `flex` (cheaper) and `priority` (faster) API tiers |
 | 🎙️ Two-voice TTS | Configurable speaker names, voices, and personalities |
 | 🌍 Multi-language | Dialogue and TTS language configurable (`language` key) |
@@ -119,7 +121,10 @@ imap:
 gemini:
   api_key_env: GEMINI_API_KEY   # name of env var holding the API key
   text_model: gemini-2.0-flash
-  # summary_model: gemini-2.0-flash-lite  # optional cheap pre-summarizer
+  # summary_model: gemini-2.0-flash-lite  # optional per-article summarizer
+  selection:
+    model: gemini-2.0-flash-lite   # cheap model for interest scoring
+    min_score: 5                   # keep articles scoring ≥ 5 (1–10)
   tts_model: gemini-2.5-flash-preview-tts
   # service_tier: flex          # optional: flex | priority (omit for standard)
   language: French              # dialogue and TTS language
@@ -235,7 +240,7 @@ tldr-podcast run -e "mails/newsletter.eml"
 uv run pytest tests/ -v
 ```
 
-168 unit tests covering every module. All external APIs are mocked.
+176 unit tests covering every module. All external APIs are mocked.
 
 ---
 
@@ -252,13 +257,13 @@ tldr-podcast/
 │   ├── email_parser.py        # MIME parser → Article dataclass list
 │   ├── web_scraper.py         # trafilatura scraper with fallback
 │   ├── link_extractor.py      # URL extraction and categorisation
-│   ├── llm_summarizer.py      # Gemini Flash dialogue + chunking
+│   ├── llm_summarizer.py      # Interest ranking + per-article summary + dialogue
 │   ├── tts_generator.py       # Gemini multi-speaker TTS
 │   ├── audio_exporter.py      # PCM → MP3/WAV via pydub
 │   ├── report_generator.py    # Timestamped report folder output
 │   ├── token_tracker.py       # Token usage and cost tracking
 │   └── retry.py               # Retry with exponential backoff
-├── tests/                     # 168 pytest unit tests (13 files)
+├── tests/                     # 176 pytest unit tests (14 files)
 └── mails/                     # Sample .eml files for testing
 ```
 
@@ -268,8 +273,8 @@ tldr-podcast/
 
 - Gemini TTS outputs raw PCM (24 kHz, mono, 16-bit). ffmpeg is required
   for MP3 encoding.
-- The TTS API has a ~4 000-byte text limit per call. The summarizer
-  automatically splits dialogue at speaker-turn boundaries.
+- The TTS API has a ~4 000-byte text limit per call. The dialogue generator
+  automatically splits output at speaker-turn boundaries (≤ 3 000 bytes/chunk).
 - Sponsor sections (`TOGETHER WITH`, `SPONSOR`, etc.) are filtered out
   before article selection.
 - Token costs are tracked live and displayed at the end of each run.
