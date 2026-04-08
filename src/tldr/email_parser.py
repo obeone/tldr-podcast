@@ -59,6 +59,9 @@ class Article:
         The theme section the article belongs to (e.g. "BIG TECH & STARTUPS").
     full_text : str
         Full article body fetched by the scraper (populated later, default "").
+    interest_score : float
+        LLM-assigned interest score (1–10). Populated by
+        :func:`~tldr.llm_summarizer.rank_articles_by_interest`, default 0.0.
     """
 
     title: str
@@ -66,6 +69,7 @@ class Article:
     url: str
     section: str
     full_text: str = field(default="")
+    interest_score: float = field(default=0.0)
 
 
 # ---------------------------------------------------------------------------

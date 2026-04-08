@@ -9,6 +9,8 @@ byte-size-bounded chunks ready for TTS processing.
 from __future__ import annotations
 
 import logging
+import re as _re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -27,6 +29,33 @@ logger = logging.getLogger(__name__)
 # Set to 3000 to leave ~600-800 bytes of headroom for the TTS preamble
 # that tts_generator.py prepends before sending to the Gemini TTS API.
 _MAX_CHUNK_BYTES = 3000
+
+_RANKING_PROMPT_TEMPLATE = """\
+You are a tech news editor. Rate each article below on a scale of 1 to 10 based \
+on its apparent interest and significance for a tech-savvy audience. Consider: \
+novelty, impact on the industry, breadth of audience affected, and technical depth.
+
+STRICT OUTPUT FORMAT:
+- One line per article: [N] score — one-sentence justification
+- Example: [1] 8 — Major breakthrough in quantum computing with practical applications.
+- Do NOT add any introduction or conclusion outside the rating lines.
+
+Articles:
+{articles}
+"""
+
+_SINGLE_SUMMARY_PROMPT_TEMPLATE = """\
+You are a tech journalist summarizer. Produce a concise summary (3–5 sentences) \
+of the article below, capturing the key facts, significance, and any notable \
+numbers or quotes. Keep technical accuracy. Write in {language}.
+
+Do NOT add any introduction or meta-commentary. Output ONLY the summary text.
+
+Article title: {title}
+Article URL: {url}
+Article text:
+{text}
+"""
 
 _SUMMARY_PROMPT_TEMPLATE = """\
 You are a tech journalist summarizer. For each article below, produce a concise \
@@ -257,19 +286,213 @@ class DialogueChunk:
     index: int
 
 
-def summarize_articles(
+def _parse_rankings(text: str, expected_count: int) -> list[float]:
+    """
+    Parse interest scores from the LLM ranking output.
+
+    Parameters
+    ----------
+    text : str
+        Raw LLM output containing ``[N] score — justification`` lines.
+    expected_count : int
+        Number of articles expected.
+
+    Returns
+    -------
+    list[float]
+        One score per article index (0-based). Missing entries default to 0.0.
+    """
+    scores: list[float] = [0.0] * expected_count
+    pattern = _re.compile(r"\[(\d+)\]\s*(\d+(?:\.\d+)?)")
+
+    for match in pattern.finditer(text):
+        idx = int(match.group(1)) - 1
+        if 0 <= idx < expected_count:
+            scores[idx] = float(match.group(2))
+
+    return scores
+
+
+def rank_articles_by_interest(
     articles: list,
     gemini_cfg: dict,
-    token_tracker: TokenTracker | None = None,
-    progress: Progress | None = None,
+    min_score: float = 5.0,
+    token_tracker: "TokenTracker | None" = None,
+    progress: "Progress | None" = None,
     task_id: Any = None,
 ) -> list:
     """
-    Pre-summarize articles with a cheaper model before dialogue generation.
+    Score articles by interest using the LLM, then filter and sort.
+
+    Sends only titles and summaries (no full text) to a cheap model
+    to rate each article's apparent interest on a 1–10 scale.  Articles
+    below *min_score* are dropped.  The remaining articles are returned
+    sorted by descending score.
+
+    Parameters
+    ----------
+    articles : list
+        Article-like objects with ``title``, ``summary``, and ``interest_score``
+        attributes.
+    gemini_cfg : dict
+        Gemini configuration.  Uses ``selection.model`` if present, otherwise
+        falls back to ``text_model``.
+    min_score : float, optional
+        Minimum interest score to keep an article, by default 5.0.
+    token_tracker : TokenTracker or None, optional
+        Records token usage for the ranking call.
+    progress : rich.progress.Progress or None, optional
+        Progress bar instance.
+    task_id : Any, optional
+        Task identifier for the progress bar.
+
+    Returns
+    -------
+    list
+        Filtered and sorted articles with ``interest_score`` populated.
+    """
+    if not articles:
+        return articles
+
+    selection_cfg = gemini_cfg.get("selection", {})
+    model = selection_cfg.get("model") or gemini_cfg.get("text_model", "gemini-2.0-flash")
+
+    article_blocks: list[str] = []
+    for i, article in enumerate(articles, start=1):
+        block = f"[{i}] {article.title}\n{article.summary}"
+        article_blocks.append(block)
+
+    prompt = _RANKING_PROMPT_TEMPLATE.format(articles="\n\n".join(article_blocks))
+
+    logger.info(
+        "Ranking %d article(s) by interest with model '%s'.",
+        len(articles),
+        model,
+    )
+
+    client = genai.Client(api_key=gemini_cfg["api_key"])
+    service_tier = gemini_cfg.get("service_tier")
+
+    config_kwargs: dict[str, Any] = {"max_output_tokens": 2048}
+    if service_tier:
+        config_kwargs["http_options"] = types.HttpOptions(
+            headers={"x-goog-api-service-tier": service_tier},
+        )
+
+    @gemini_retry
+    def _call_api():
+        return client.models.generate_content(
+            model=model,
+            contents=prompt,
+            config=types.GenerateContentConfig(**config_kwargs),
+        )
+
+    response = _call_api()
+
+    if token_tracker is not None:
+        token_tracker.record_usage(model, response.usage_metadata)
+
+    if progress is not None and task_id is not None:
+        progress.advance(task_id)
+
+    ranking_text = response.text
+    if not ranking_text:
+        logger.warning("Ranking model returned empty text — keeping all articles.")
+        return articles
+
+    scores = _parse_rankings(ranking_text, len(articles))
+
+    for i, article in enumerate(articles):
+        article.interest_score = scores[i]
+        logger.debug(
+            "Article %d score=%.1f: %s", i, scores[i], article.title[:60],
+        )
+
+    kept = [a for a in articles if a.interest_score >= min_score]
+    kept.sort(key=lambda a: a.interest_score, reverse=True)
+
+    logger.info(
+        "Interest ranking: %d/%d article(s) kept (min_score=%.1f).",
+        len(kept),
+        len(articles),
+        min_score,
+    )
+
+    return kept
+
+
+def _summarize_single_article(
+    article: Any,
+    model: str,
+    client: Any,
+    config_kwargs: dict[str, Any],
+    language: str,
+) -> tuple[str | None, Any]:
+    """
+    Summarize a single article via the Gemini API.
+
+    Parameters
+    ----------
+    article : Article-like
+        Object with ``title``, ``url``, ``full_text`` / ``summary`` attributes.
+    model : str
+        Gemini model name to use.
+    client : genai.Client
+        Pre-configured Gemini client.
+    config_kwargs : dict
+        Keyword arguments for ``GenerateContentConfig``.
+    language : str
+        Target language for the summary.
+
+    Returns
+    -------
+    tuple[str or None, response or None]
+        The generated summary text and the raw API response, or ``(None, None)``
+        on failure.
+    """
+    text = getattr(article, "full_text", "") or getattr(article, "summary", "")
+    title = getattr(article, "title", "Untitled")
+    url = getattr(article, "url", "")
+
+    prompt = _SINGLE_SUMMARY_PROMPT_TEMPLATE.format(
+        language=language,
+        title=title,
+        url=url,
+        text=text,
+    )
+
+    @gemini_retry
+    def _call_api():
+        return client.models.generate_content(
+            model=model,
+            contents=prompt,
+            config=types.GenerateContentConfig(**config_kwargs),
+        )
+
+    try:
+        response = _call_api()
+        return response.text.strip() if response.text else None, response
+    except Exception:
+        logger.warning("Failed to summarize article: %s", title[:60], exc_info=True)
+        return None, None
+
+
+def summarize_articles(
+    articles: list,
+    gemini_cfg: dict,
+    token_tracker: "TokenTracker | None" = None,
+    progress: "Progress | None" = None,
+    task_id: Any = None,
+) -> list:
+    """
+    Pre-summarize each article individually with a cheaper model.
 
     Each article's ``full_text`` (or ``summary``) is replaced by a compact
-    LLM-generated summary.  This reduces the token count sent to the more
-    expensive script-writer model in :func:`generate_dialogue`.
+    LLM-generated summary via an individual API call.  This gives better
+    per-article quality than a single bulk call and reduces the token count
+    sent to the script-writer model in :func:`generate_dialogue`.
+
+    Summarization runs concurrently (up to 5 workers) for speed.
 
     The model used is ``gemini_cfg["summary_model"]``.  If this key is absent
     or equal to ``gemini_cfg["text_model"]``, the function returns *articles*
@@ -282,7 +505,7 @@ def summarize_articles(
     gemini_cfg : dict
         Gemini configuration containing ``api_key`` and ``summary_model``.
     token_tracker : TokenTracker or None, optional
-        Records token usage for the summarization call.
+        Records token usage for each summarization call.
     progress : rich.progress.Progress or None, optional
         Progress bar instance.
     task_id : Any, optional
@@ -297,26 +520,14 @@ def summarize_articles(
     if not summary_model or summary_model == gemini_cfg.get("text_model"):
         logger.info("No separate summary_model configured — skipping pre-summarization.")
         if progress is not None and task_id is not None:
-            progress.advance(task_id)
+            for _ in articles:
+                progress.advance(task_id)
         return articles
 
     language = gemini_cfg.get("language", "French")
 
-    article_blocks: list[str] = []
-    for i, article in enumerate(articles, start=1):
-        text = getattr(article, "full_text", "") or getattr(article, "summary", "")
-        title = getattr(article, "title", f"Article {i}")
-        url = getattr(article, "url", "")
-        block = f"[{i}] {title}\nURL: {url}\n{text}"
-        article_blocks.append(block)
-
-    prompt = _SUMMARY_PROMPT_TEMPLATE.format(
-        language=language,
-        articles="\n\n".join(article_blocks),
-    )
-
     logger.info(
-        "Pre-summarizing %d article(s) with model '%s'.",
+        "Pre-summarizing %d article(s) individually with model '%s'.",
         len(articles),
         summary_model,
     )
@@ -324,77 +535,57 @@ def summarize_articles(
     client = genai.Client(api_key=gemini_cfg["api_key"])
     service_tier = gemini_cfg.get("service_tier")
 
-    config_kwargs: dict[str, Any] = {"max_output_tokens": 4096}
+    config_kwargs: dict[str, Any] = {"max_output_tokens": 1024}
     if service_tier:
         config_kwargs["http_options"] = types.HttpOptions(
             headers={"x-goog-api-service-tier": service_tier},
         )
 
-    @gemini_retry
-    def _call_api():
-        return client.models.generate_content(
-            model=summary_model,
-            contents=prompt,
-            config=types.GenerateContentConfig(**config_kwargs),
+    max_workers = min(5, len(articles))
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_article = {
+            executor.submit(
+                _summarize_single_article,
+                article,
+                summary_model,
+                client,
+                config_kwargs,
+                language,
+            ): article
+            for article in articles
+        }
+
+        for future in as_completed(future_to_article):
+            article = future_to_article[future]
+            summary_text, response = future.result()
+
+            if token_tracker is not None and response is not None:
+                token_tracker.record_usage(summary_model, response.usage_metadata)
+
+            if summary_text:
+                article.full_text = summary_text
+                logger.debug(
+                    "Summarized (%d chars): %s",
+                    len(summary_text),
+                    article.title[:60],
+                )
+            else:
+                logger.warning(
+                    "Summary empty — keeping original text: %s",
+                    article.title[:60],
+                )
+
+            if progress is not None and task_id is not None:
+                progress.advance(task_id)
+
+    if progress is not None and task_id is not None and token_tracker is not None:
+        progress.update(
+            task_id,
+            description=f"[cyan]Summarized[/cyan] — {token_tracker.live_line()}",
         )
 
-    response = _call_api()
-
-    if token_tracker is not None:
-        token_tracker.record_usage(summary_model, response.usage_metadata)
-
-    if progress is not None and task_id is not None:
-        progress.advance(task_id)
-        if token_tracker is not None:
-            progress.update(
-                task_id,
-                description=f"[cyan]Summarized[/cyan] — {token_tracker.live_line()}",
-            )
-
-    summary_text = response.text
-    if not summary_text:
-        logger.warning("Summary model returned empty text — keeping original articles.")
-        return articles
-
-    summaries = _parse_summaries(summary_text, len(articles))
-
-    for i, article in enumerate(articles):
-        if i < len(summaries) and summaries[i]:
-            article.full_text = summaries[i]
-            logger.debug("Article %d summarized: %d chars.", i, len(summaries[i]))
-
     return articles
-
-
-def _parse_summaries(text: str, expected_count: int) -> list[str]:
-    """
-    Parse numbered summary blocks from the LLM output.
-
-    Parameters
-    ----------
-    text : str
-        Raw LLM output containing ``[N] summary`` blocks.
-    expected_count : int
-        Number of articles expected.
-
-    Returns
-    -------
-    list[str]
-        One summary string per article index (0-based).  Missing entries are
-        empty strings.
-    """
-    import re
-
-    summaries: list[str] = [""] * expected_count
-    # Match blocks like "[1] Some summary text..."
-    pattern = re.compile(r"\[(\d+)\]\s*(.+?)(?=\n\[|\Z)", re.DOTALL)
-
-    for match in pattern.finditer(text):
-        idx = int(match.group(1)) - 1  # convert to 0-based
-        if 0 <= idx < expected_count:
-            summaries[idx] = match.group(2).strip()
-
-    return summaries
 
 
 def generate_dialogue(
