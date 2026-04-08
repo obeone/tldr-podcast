@@ -50,7 +50,7 @@ from tldr.config import ConfigError, load_config
 from tldr.email_parser import ParseError, parse_emails
 from tldr.imap_client import IMAPError, fetch_unread_emails, move_emails_to_folder
 from tldr.link_extractor import extract_links
-from tldr.llm_summarizer import generate_dialogue, rank_articles_by_interest, summarize_articles
+from tldr.llm_summarizer import generate_dialogue, rank_articles_by_interest
 from tldr.report_generator import generate_report
 from tldr.token_tracker import TokenTracker
 from tldr.tts_generator import generate_audio_chunks
@@ -440,25 +440,7 @@ def run(
                 len(link_report.other),
             )
 
-        # 4d. Per-article summarization (optional, when summary_model is configured)
-        if gemini_cfg.get("summary_model") and gemini_cfg["summary_model"] != gemini_cfg.get("text_model"):
-            summary_task = progress.add_task(
-                f"[cyan]Summarizing[/cyan] {len(all_articles)} article(s)…",
-                total=len(all_articles),
-            )
-            all_articles = summarize_articles(
-                all_articles,
-                gemini_cfg,
-                token_tracker=tracker,
-                progress=progress,
-                task_id=summary_task,
-            )
-            progress.update(
-                summary_task,
-                description=f"[cyan]Summarized[/cyan] — {tracker.live_line()}",
-            )
-
-        # 4e. Dialogue generation
+        # 4d. Dialogue generation
         llm_task = progress.add_task("[cyan]Generating dialogue…[/cyan]", total=1)
         chunks = generate_dialogue(
             all_articles,
@@ -496,7 +478,7 @@ def run(
                         click.echo()
             sys.exit(0)
 
-        # 4f. TTS synthesis
+        # 4e. TTS synthesis
         tts_task = progress.add_task(
             f"[cyan]TTS synthesis[/cyan] ({len(chunks)} chunk(s))…",
             total=len(chunks),

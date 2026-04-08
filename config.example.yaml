@@ -20,11 +20,9 @@ gemini:
   api_key_env: GEMINI_API_KEY
   # Gemini model for dialogue generation (text / script writer)
   text_model: gemini-2.0-flash
-  # Optional: cheaper model for pre-summarizing articles before dialogue
-  # generation.  When set (and different from text_model), each article is
-  # summarized individually, reducing the token count sent to the script
-  # writer while preserving per-article quality.
-  # summary_model: gemini-2.0-flash-lite
+  # Note: summary_model is no longer used.  The interest ranking step
+  # already selects only the best articles, so full scraped text is sent
+  # directly to the script writer for maximum dialogue quality.
   # Gemini model for TTS audio generation
   tts_model: gemini-2.5-flash-preview-tts
   # Optional: API service tier — "flex" (cheaper/slower) or "priority"

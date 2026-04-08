@@ -39,7 +39,7 @@ uv run pytest tests/ --cov=src/tldr
 Pipeline (left to right):
 
 ```
-IMAP / .eml → email_parser → interest_ranking → web_scraper → per-article_summarizer → llm_dialogue → tts_generator → audio_exporter → MP3
+IMAP / .eml → email_parser → interest_ranking → web_scraper → llm_dialogue → tts_generator → audio_exporter → MP3
 ```
 
 **`src/tldr/` modules:**
@@ -48,7 +48,7 @@ IMAP / .eml → email_parser → interest_ranking → web_scraper → per-articl
 - `imap_client.py` — Fetches unread emails over IMAP SSL; returns `list[bytes]`.
 - `email_parser.py` — Parses raw MIME bytes into `Article` dataclasses. Strips sponsor sections (`TOGETHER WITH`, `SPONSOR`, etc.) using regex. Resolves article URLs from the "Links:" footer block.
 - `web_scraper.py` — Fetches full article text via trafilatura; falls back to the email summary if scraping fails. Populates `Article.full_text`.
-- `llm_summarizer.py` — Three-stage LLM module: (1) `rank_articles_by_interest()` scores articles 1–10 by title+summary to filter before scraping; (2) `summarize_articles()` summarizes each article individually via concurrent API calls; (3) `generate_dialogue()` produces a two-host dialogue script, split into `DialogueChunk` objects bounded to ≤3000 UTF-8 bytes each.
+- `llm_summarizer.py` — Two-stage LLM module: (1) `rank_articles_by_interest()` scores articles 1–10 by title+summary to select the most interesting before scraping; (2) `generate_dialogue()` produces a two-host dialogue script from full article text, split into `DialogueChunk` objects bounded to ≤3000 UTF-8 bytes each.
 - `tts_generator.py` — Calls Gemini multi-speaker TTS for each `DialogueChunk`; returns raw PCM bytes (24 kHz, mono, 16-bit LE).
 - `audio_exporter.py` — Concatenates PCM chunks and encodes to MP3 or WAV via pydub + ffmpeg.
 

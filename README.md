@@ -18,10 +18,8 @@ flowchart TB
 
     RANK --> WS[Web Scraper<br>trafilatura]
 
-    WS --> SUM[Per-Article Summarizer<br>concurrent · optional]
+    WS --> LLM[Script Writer<br>Gemini Flash]
     WS --> LE[Link Extractor<br>repos · models · papers]
-
-    SUM --> LLM[Script Writer<br>Gemini Flash]
 
     LLM --> DC[Dialogue chunks<br>≤ 3 000 bytes]
 
@@ -47,7 +45,7 @@ flowchart TB
 | 🌐 Article scraping | Full text via trafilatura, fallback to summary |
 | 🔗 Link extraction | Categorises URLs into repos, models, papers, sources |
 | 🎯 Interest ranking | LLM scores articles 1–10 by interest before scraping; top `max_articles` are kept |
-| 📝 Per-article summarization | Optional cheap model summarizes each article individually via concurrent API calls |
+| 📄 Full-text pipeline | Scraped full text sent directly to the script writer for maximum dialogue quality |
 | ⚡ Service tiers | Support for `flex` (cheaper) and `priority` (faster) API tiers |
 | 🎙️ Two-voice TTS | Configurable speaker names, voices, and personalities |
 | 🌍 Multi-language | Dialogue and TTS language configurable (`language` key) |
@@ -121,7 +119,6 @@ imap:
 gemini:
   api_key_env: GEMINI_API_KEY   # name of env var holding the API key
   text_model: gemini-2.0-flash
-  # summary_model: gemini-2.0-flash-lite  # optional per-article summarizer
   selection:
     model: gemini-2.0-flash-lite   # cheap model for interest scoring
   tts_model: gemini-2.5-flash-preview-tts
