@@ -1,12 +1,13 @@
 """
 Tests for the report generator module (src/tldr/report_generator.py).
 
-Covers rendering of articles, script, and summary files, as well as
+Covers rendering of articles, script, summary, and overview files, as well as
 the top-level ``generate_report`` function that creates the output folder.
 """
 
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
 
 from tldr.email_parser import Article
@@ -14,6 +15,7 @@ from tldr.link_extractor import CategorisedLink, LinkReport
 from tldr.llm_summarizer import DialogueChunk
 from tldr.report_generator import (
     _render_articles,
+    _render_overview,
     _render_script,
     _render_summary,
     generate_report,
@@ -75,9 +77,25 @@ class TestRenderArticles:
         assert "## BIG TECH" in md
 
     def test_contains_summary(self) -> None:
-        """The summary text is included."""
+        """The summary text is included with a bold label."""
         md = _render_articles([_make_article(summary="This is important.")])
-        assert "This is important." in md
+        assert "**Summary:** This is important." in md
+
+    def test_contains_full_text_in_details(self) -> None:
+        """Full text appears in a collapsible details block."""
+        md = _render_articles([_make_article(summary="Short.", full_text="Long detailed text here.")])
+        assert "<details>" in md
+        assert "Long detailed text here." in md
+
+    def test_no_details_when_full_text_matches_summary(self) -> None:
+        """No details block when full_text equals the summary."""
+        md = _render_articles([_make_article(summary="Same.", full_text="Same.")])
+        assert "<details>" not in md
+
+    def test_no_details_when_full_text_empty(self) -> None:
+        """No details block when full_text is empty."""
+        md = _render_articles([_make_article(summary="Summary only.", full_text="")])
+        assert "<details>" not in md
 
     def test_empty_articles_returns_header_only(self) -> None:
         """An empty list produces just the top-level heading."""
@@ -171,6 +189,87 @@ class TestRenderSummary:
 
 
 # ---------------------------------------------------------------------------
+# Tests: _render_overview
+# ---------------------------------------------------------------------------
+
+
+class TestRenderOverview:
+    """_render_overview() should produce a Markdown overview with metadata."""
+
+    def test_contains_date(self) -> None:
+        """The target date appears in the table."""
+        md = _render_overview(
+            [_make_article()], [_make_chunk()], _make_link_report(),
+            target_date=date(2026, 4, 3),
+        )
+        assert "2026-04-03" in md
+
+    def test_contains_article_count(self) -> None:
+        """The article count is shown."""
+        md = _render_overview(
+            [_make_article(), _make_article(title="Second")],
+            [_make_chunk()], _make_link_report(),
+        )
+        assert "| Articles selected | 2 |" in md
+
+    def test_contains_email_count(self) -> None:
+        """The email count is shown."""
+        md = _render_overview(
+            [_make_article()], [_make_chunk()], _make_link_report(),
+            email_count=3,
+        )
+        assert "| Emails processed | 3 |" in md
+
+    def test_contains_audio_path(self) -> None:
+        """The audio file path is shown when provided."""
+        md = _render_overview(
+            [_make_article()], [_make_chunk()], _make_link_report(),
+            audio_path="output/tldr_2026.mp3",
+        )
+        assert "output/tldr_2026.mp3" in md
+
+    def test_contains_token_summary(self) -> None:
+        """The token summary block is included."""
+        md = _render_overview(
+            [_make_article()], [_make_chunk()], _make_link_report(),
+            token_summary="Token usage: 1,000 in + 500 out",
+        )
+        assert "Token usage: 1,000 in + 500 out" in md
+
+    def test_contains_sections(self) -> None:
+        """Article sections are listed."""
+        articles = [
+            _make_article(section="AI & ML"),
+            _make_article(title="B", section="DEVOPS"),
+        ]
+        md = _render_overview(articles, [_make_chunk()], _make_link_report())
+        assert "AI & ML" in md
+        assert "DEVOPS" in md
+
+    def test_contains_link_breakdown(self) -> None:
+        """Link category counts are shown."""
+        md = _render_overview(
+            [_make_article()], [_make_chunk()], _make_link_report(),
+        )
+        assert "## Link Breakdown" in md
+        assert "Source articles" in md
+
+    def test_no_link_breakdown_when_empty(self) -> None:
+        """No link breakdown section for empty reports."""
+        md = _render_overview(
+            [_make_article()], [_make_chunk()], LinkReport(),
+        )
+        assert "## Link Breakdown" not in md
+
+    def test_no_token_section_when_none(self) -> None:
+        """No token section when summary is not provided."""
+        md = _render_overview(
+            [_make_article()], [_make_chunk()], _make_link_report(),
+        )
+        assert "## Token Usage" not in md
+
+
+# ---------------------------------------------------------------------------
 # Tests: generate_report (integration)
 # ---------------------------------------------------------------------------
 
@@ -179,7 +278,7 @@ class TestGenerateReport:
     """generate_report() should create the folder with all three files."""
 
     def test_creates_folder_and_files(self, tmp_path: Path) -> None:
-        """The report folder contains articles.md, script.md, and summary.md."""
+        """The report folder contains overview.md, articles.md, script.md, and summary.md."""
         articles = [_make_article()]
         chunks = [_make_chunk()]
         link_report = _make_link_report()
@@ -187,6 +286,7 @@ class TestGenerateReport:
         result = generate_report(articles, chunks, link_report, tmp_path, "2026-04-03_1430")
 
         assert result == tmp_path / "tldr_2026-04-03_1430"
+        assert (result / "overview.md").is_file()
         assert (result / "articles.md").is_file()
         assert (result / "script.md").is_file()
         assert (result / "summary.md").is_file()
