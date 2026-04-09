@@ -89,6 +89,14 @@ Every feature, fix, or behavioural change **must** bump the version in `pyprojec
 - **minor** (`1.0.0` → `1.1.0`): new features, prompt changes, new CLI options
 - **major** (`1.0.0` → `2.0.0`): breaking changes (config format, CLI interface, output format)
 
+## Versioning
+
+Every feature, fix, or behavioural change **must** bump the version in `pyproject.toml` before committing. Follow [SemVer](https://semver.org/):
+
+- **patch** (`0.2.0` → `0.2.1`): bug fixes, minor tweaks
+- **minor** (`0.2.0` → `0.3.0`): new features, prompt changes, new CLI options
+- **major** (`0.2.0` → `1.0.0`): breaking changes (config format, CLI interface, output format)
+
 ## Dependencies
 
 Requires `ffmpeg` installed on the system for MP3 encoding (not a Python package).
