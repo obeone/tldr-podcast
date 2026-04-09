@@ -95,6 +95,13 @@ delivery (e.g., "(avec enthousiasme)", "(sceptique)", "(posément)", \
 "(en pesant ses mots)", "(après une courte pause)"). Vary them naturally \
 according to the content and pace of the discussion.
 - Use shorter sentences for excitement, longer ones for analysis.
+- End the dialogue with a conclusion segment where the hosts briefly recap ALL \
+the topics covered during the episode. Number each topic explicitly in the \
+dialogue (e.g., "premier sujet…", "deuxième…", "troisième…" or "numéro 1…", \
+"numéro 2…"). The recap must feel natural and conversational — not a dry list. \
+Keep it engaging: add a witty remark, a favourite pick, a teaser for next time, \
+or a thought-provoking sign-off. The numbered recap helps listeners remember \
+what was discussed.
 
 STRICT OUTPUT FORMAT:
 - Each line must follow exactly this pattern: SpeakerName: dialogue text
