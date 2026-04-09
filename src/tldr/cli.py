@@ -244,8 +244,10 @@ def _select_emails_interactive(
             dt = parsedate_to_datetime(msg["Date"])
             date_str = dt.strftime("%Y-%m-%d %H:%M")
         except Exception:
+            msg = message_from_bytes(raw)
             date_str = "unknown date"
-        click.echo(f"  [{idx}] {subject}  ({date_str})")
+        sender = str(msg.get("From", "unknown sender"))
+        click.echo(f"  [{idx}] {subject}  — {sender}  ({date_str})")
 
     click.echo()
     raw_input = click.prompt(
