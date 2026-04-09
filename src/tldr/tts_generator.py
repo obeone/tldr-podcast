@@ -18,7 +18,7 @@ requests) to reduce total wall-clock time.
 from __future__ import annotations
 
 import logging
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import TYPE_CHECKING, Any
 
 from google import genai
@@ -255,10 +255,12 @@ def generate_audio_chunks(
         max_workers,
     )
 
-    # Submit all chunks to the thread pool, preserving order via indexed futures.
-    audio_chunks: list[bytes] = []
+    # Submit all chunks to the thread pool.  Use as_completed so the
+    # progress bar advances as soon as *any* chunk finishes, then
+    # reassemble results in the original order for audio sequencing.
+    results: dict[int, bytes] = {}
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = [
+        future_to_index = {
             executor.submit(
                 _generate_chunk_audio,
                 chunk,
@@ -266,12 +268,13 @@ def generate_audio_chunks(
                 gemini_cfg,
                 voice_config,
                 temperature,
-            )
-            for chunk in chunks
-        ]
-        # Iterate in submission order to preserve audio sequence.
-        for future in futures:
+            ): i
+            for i, chunk in enumerate(chunks)
+        }
+        for future in as_completed(future_to_index):
+            idx = future_to_index[future]
             pcm_bytes, usage_metadata = future.result()
+            results[idx] = pcm_bytes
             if token_tracker is not None:
                 token_tracker.record_usage(gemini_cfg["tts_model"], usage_metadata)
             if progress is not None and task_id is not None:
@@ -281,6 +284,5 @@ def generate_audio_chunks(
                         task_id,
                         description=f"[cyan]TTS synthesis[/cyan] — {token_tracker.live_line()}",
                     )
-            audio_chunks.append(pcm_bytes)
 
-    return audio_chunks
+    return [results[i] for i in range(len(chunks))]
