@@ -81,6 +81,18 @@ def _render_overview(
         lines.append(f"| Audio file | `{audio_path}` |")
     lines.append("")
 
+    # Topics covered (numbered list matching the dialogue conclusion)
+    if articles:
+        lines.append("## Topics Covered\n")
+        for idx, article in enumerate(articles, start=1):
+            title = article.title
+            url = article.url
+            if url:
+                lines.append(f"{idx}. [{title}]({url})")
+            else:
+                lines.append(f"{idx}. {title}")
+        lines.append("")
+
     # Link breakdown
     if link_report.total > 0:
         lines.append("## Link Breakdown\n")
