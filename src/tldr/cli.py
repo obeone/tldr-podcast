@@ -33,7 +33,7 @@ import coloredlogs
 import yaml
 from dotenv import load_dotenv
 from email import message_from_bytes
-from email.utils import parsedate_to_datetime
+from email.utils import parseaddr, parsedate_to_datetime
 from rich.console import Console
 from rich.progress import (
     BarColumn,
@@ -246,7 +246,9 @@ def _select_emails_interactive(
         except Exception:
             msg = message_from_bytes(raw)
             date_str = "unknown date"
-        sender = str(msg.get("From", "unknown sender"))
+        raw_from = str(msg.get("From", ""))
+        sender_name, sender_addr = parseaddr(raw_from)
+        sender = sender_name or sender_addr or "unknown sender"
         click.echo(f"  [{idx}] {subject}  — {sender}  ({date_str})")
 
     click.echo()
