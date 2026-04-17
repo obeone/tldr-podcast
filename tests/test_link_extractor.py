@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from tldr.email_parser import Article
+from tldr.models import Article
 from tldr.link_extractor import (
     CategorisedLink,
     LinkReport,

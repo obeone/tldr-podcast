@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import date
 from pathlib import Path
 
-from tldr.email_parser import Article
+from tldr.models import Article
 from tldr.link_extractor import CategorisedLink, LinkReport
 from tldr.llm_summarizer import DialogueChunk
 from tldr.report_generator import (
@@ -238,13 +238,13 @@ class TestRenderOverview:
         )
         assert "| Articles selected | 2 |" in md
 
-    def test_contains_email_count(self) -> None:
-        """The email count is shown."""
+    def test_contains_topics(self) -> None:
+        """The list of fetched TLDR topics is shown."""
         md = _render_overview(
             [_make_article()], [_make_chunk()], _make_link_report(),
-            email_count=3,
+            topics=["ai", "devops"],
         )
-        assert "| Emails processed | 3 |" in md
+        assert "| Topics | ai, devops |" in md
 
     def test_contains_audio_path(self) -> None:
         """The audio file path is shown when provided."""

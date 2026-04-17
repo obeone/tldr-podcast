@@ -3,17 +3,15 @@
 # Keys ending with _env reference the name of an environment variable
 # that will be read at runtime (never store secrets directly here).
 
-imap:
-  host: imap.gmail.com
-  port: 993
-  username: your@email.com
-  # Name of the environment variable holding your IMAP password
-  password_env: IMAP_PASSWORD
-  # IMAP folder to search for TLDR newsletters
-  folder: INBOX
-  # Folder where processed emails are moved after a successful podcast export.
-  # The folder is created automatically if it does not exist.
-  seen_folder: TLDR/Seen
+web:
+  # Topics to fetch by default when running interactively.
+  # All supported slugs: ai infosec tech crypto founders dev it design
+  #                      product devops marketing data fintech
+  default_topics: [ai, infosec, devops]
+  # User-Agent header sent to tldr.tech
+  user_agent: "tldr-podcast/1.0"
+  # HTTP timeout in seconds for newsletter page fetches
+  timeout_seconds: 15
 
 gemini:
   # Name of the environment variable holding your Gemini API key
@@ -56,14 +54,15 @@ gemini:
     temperature: 1.2   # 0.0–2.0 — higher = more expressive
 
 scraping:
-  # Maximum number of articles to scrape (additional ones keep email summary)
+  # Maximum number of articles to scrape (additional ones keep newsletter summary)
   max_articles: 15
   # HTTP request timeout in seconds
   timeout_seconds: 10
 
 output:
-  # Directory where the generated podcast file will be saved
-  directory: output
+  # Directory where the generated podcast file will be saved.
+  # Override per-run with --output-dir.
+  dir: "."
   # Output format: mp3 or wav
   format: mp3
 

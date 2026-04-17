@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from tldr.email_parser import Article
+    from tldr.models import Article
 
 logger = logging.getLogger(__name__)
 
@@ -203,7 +203,7 @@ def extract_links(articles: list[Article]) -> LinkReport:
     ----------
     articles : list[Article]
         Parsed articles, typically produced by
-        :func:`~tldr.email_parser.parse_emails`.
+        :func:`~tldr.web_source.fetch_newsletters`.
 
     Returns
     -------
@@ -212,7 +212,7 @@ def extract_links(articles: list[Article]) -> LinkReport:
 
     Examples
     --------
-    >>> from tldr.email_parser import Article
+    >>> from tldr.models import Article
     >>> a = Article(title="Demo", summary="See https://github.com/x/y",
     ...             url="https://example.com/post", section="AI")
     >>> report = extract_links([a])

@@ -9,13 +9,15 @@ Commands
 
 Run options
 -----------
---config       Path to the YAML configuration file (default: $XDG_CONFIG_HOME/tldr/config.yaml).
---eml          Path to a local .eml file (skips IMAP fetch when provided).
---date         Date to process in YYYY-MM-DD format (default: today).
---dry-run      Print the generated dialogue to stdout instead of calling TTS.
---no-progress  Disable the rich progress bar.
---verbose      Enable DEBUG-level logging.
---no-report    Disable the report folder generated alongside the podcast.
+--config          Path to the YAML configuration file (default: $XDG_CONFIG_HOME/tldr/config.yaml).
+--topics          Comma-separated topic slugs to fetch, e.g. ``ai,devops``.
+--date            Date to process in YYYY-MM-DD format (default: today).
+--output-dir      Directory where the podcast file is written (overrides config).
+--no-interactive  Skip the topic-selection checkbox prompt.
+--dry-run         Print the generated dialogue to stdout instead of calling TTS.
+--no-progress     Disable the rich progress bar.
+--verbose         Enable DEBUG-level logging.
+--no-report       Disable the report folder generated alongside the podcast.
 """
 
 from __future__ import annotations
@@ -25,15 +27,13 @@ import os
 import re
 import shutil
 import sys
-from datetime import date, datetime, timezone
+from datetime import date, datetime
 from pathlib import Path
 
 import click
 import coloredlogs
 import yaml
 from dotenv import load_dotenv
-from email import message_from_bytes
-from email.utils import parseaddr, parsedate_to_datetime
 from rich.console import Console
 from rich.progress import (
     BarColumn,
@@ -47,18 +47,19 @@ from rich.syntax import Syntax
 
 from tldr.audio_exporter import export_audio
 from tldr.config import ConfigError, load_config
-from tldr.email_parser import ParseError, parse_emails
-from tldr.imap_client import IMAPError, fetch_emails, move_emails_to_folder
 from tldr.link_extractor import extract_links
 from tldr.llm_summarizer import generate_dialogue, rank_articles_by_interest
+from tldr.models import Article
 from tldr.report_generator import generate_report
 from tldr.token_tracker import TokenTracker
 from tldr.tts_generator import generate_audio_chunks
 from tldr.web_scraper import scrape_articles
+from tldr.web_source import SUPPORTED_TOPICS, fetch_newsletters, validate_topics
 
 logger = logging.getLogger(__name__)
 
 console = Console(stderr=False)
+
 
 def _xdg_config_home() -> Path:
     """Return ``$XDG_CONFIG_HOME`` or its default (``~/.config``)."""
@@ -126,36 +127,6 @@ def _dedup_articles(articles: list) -> list:
     return result
 
 
-def _sort_emails_by_date(
-    email_data: list[tuple[int, bytes]],
-) -> list[tuple[int, bytes]]:
-    """
-    Return *email_data* sorted ascending by the ``Date:`` header of each message.
-
-    Entries whose ``Date:`` header cannot be parsed are placed last.
-
-    Parameters
-    ----------
-    email_data : list[tuple[int, bytes]]
-        List of ``(message_id, raw_bytes)`` pairs as returned by
-        :func:`~tldr.imap_client.fetch_emails`.
-
-    Returns
-    -------
-    list[tuple[int, bytes]]
-        Sorted copy (ascending by send date).
-    """
-    def _key(item: tuple[int, bytes]):
-        _, raw = item
-        try:
-            msg = message_from_bytes(raw)
-            return parsedate_to_datetime(msg["Date"])
-        except Exception:
-            return datetime.max.replace(tzinfo=timezone.utc)
-
-    return sorted(email_data, key=_key)
-
-
 def _setup_logging(verbose: bool) -> None:
     """Configure coloredlogs for the root logger."""
     level = "DEBUG" if verbose else "INFO"
@@ -191,112 +162,6 @@ def _make_progress(disable: bool) -> Progress:
     )
 
 
-def _extract_email_subject(raw: bytes) -> str:
-    """
-    Extract the Subject header from raw email bytes.
-
-    Parameters
-    ----------
-    raw : bytes
-        Raw RFC 822 bytes for a single email message.
-
-    Returns
-    -------
-    str
-        The decoded subject, or ``"(no subject)"`` if missing.
-    """
-    try:
-        msg = message_from_bytes(raw)
-        subject = msg.get("Subject", "(no subject)")
-        # Decode encoded headers (RFC 2047).
-        from email.header import decode_header
-        parts = decode_header(subject)
-        decoded = ""
-        for part, charset in parts:
-            if isinstance(part, bytes):
-                decoded += part.decode(charset or "utf-8", errors="replace")
-            else:
-                decoded += part
-        return decoded.strip() or "(no subject)"
-    except Exception:
-        return "(no subject)"
-
-
-def _select_emails_interactive(
-    email_data: list[tuple[int, bytes]],
-) -> list[tuple[int, bytes]]:
-    """
-    Prompt the user to select which emails to process when multiple are found.
-
-    Displays a numbered list with subject and date, then asks the user to
-    pick one or more entries. Accepts comma-separated numbers, ranges
-    (e.g. ``1-3``), or ``*`` / ``all`` to select everything.
-
-    Parameters
-    ----------
-    email_data : list[tuple[int, bytes]]
-        Pre-sorted list of ``(message_id, raw_bytes)`` pairs.
-
-    Returns
-    -------
-    list[tuple[int, bytes]]
-        The subset selected by the user.
-    """
-    click.echo(f"\nFound {len(email_data)} email(s) for this date:\n")
-    for idx, (_, raw) in enumerate(email_data, start=1):
-        subject = _extract_email_subject(raw)
-        try:
-            msg = message_from_bytes(raw)
-            dt = parsedate_to_datetime(msg["Date"])
-            date_str = dt.strftime("%Y-%m-%d %H:%M")
-        except Exception:
-            msg = message_from_bytes(raw)
-            date_str = "unknown date"
-        raw_from = str(msg.get("From", ""))
-        sender_name, sender_addr = parseaddr(raw_from)
-        sender = sender_name or sender_addr or "unknown sender"
-        click.echo(f"  [{idx}] {subject}  — {sender}  ({date_str})")
-
-    click.echo()
-    raw_input = click.prompt(
-        "Select email(s) to process (e.g. 1,3 or 1-3 or * for all)",
-        default="*",
-    )
-    raw_input = raw_input.strip()
-
-    if raw_input in ("*", "all"):
-        return email_data
-
-    selected_indices: set[int] = set()
-    for part in raw_input.split(","):
-        part = part.strip()
-        if "-" in part:
-            try:
-                start, end = part.split("-", 1)
-                for i in range(int(start), int(end) + 1):
-                    selected_indices.add(i)
-            except ValueError:
-                click.echo(f"  Warning: ignoring invalid range '{part}'", err=True)
-        else:
-            try:
-                selected_indices.add(int(part))
-            except ValueError:
-                click.echo(f"  Warning: ignoring invalid input '{part}'", err=True)
-
-    result = [
-        email_data[i - 1]
-        for i in sorted(selected_indices)
-        if 1 <= i <= len(email_data)
-    ]
-
-    if not result:
-        click.echo("No valid selection. Aborting.")
-        sys.exit(0)
-
-    click.echo(f"  → {len(result)} email(s) selected.\n")
-    return result
-
-
 def _resolve_config_path(config_path: str | None) -> str:
     """
     Return the effective config file path, falling back to the XDG default.
@@ -328,6 +193,73 @@ def _resolve_config_path(config_path: str | None) -> str:
     sys.exit(1)
 
 
+def _select_topics_interactive(default_topics: list[str]) -> list[str]:
+    """
+    Display an interactive checkbox so the user can pick which topics to fetch.
+
+    Falls back to returning *default_topics* when ``questionary`` is not
+    available or when stdin is not a TTY.
+
+    Parameters
+    ----------
+    default_topics : list[str]
+        Topic slugs that are pre-checked in the selector.
+
+    Returns
+    -------
+    list[str]
+        Selected topic slugs (at least one entry).
+    """
+    if not sys.stdin.isatty():
+        logger.debug("stdin is not a TTY — using default topics.")
+        return default_topics or list(SUPPORTED_TOPICS[:3])
+
+    try:
+        import questionary  # type: ignore[import-untyped]
+    except ImportError:
+        logger.warning("questionary not available; using default topics.")
+        return default_topics or list(SUPPORTED_TOPICS[:3])
+
+    choices = [
+        questionary.Choice(title=t, checked=(t in default_topics))
+        for t in SUPPORTED_TOPICS
+    ]
+    selected: list[str] | None = questionary.checkbox(
+        "Select TLDR topics to fetch (space to toggle, enter to confirm):",
+        choices=choices,
+    ).ask()
+
+    if not selected:
+        click.echo("[ERROR] No topics selected. Aborting.", err=True)
+        sys.exit(1)
+
+    return selected
+
+
+def _build_output_stem(topics: list[str], target_date: date) -> str:
+    """
+    Build the filename stem for a podcast episode.
+
+    Topics are sorted alphabetically and joined with hyphens, followed by
+    the ISO date.  For example topics ``["devops", "ai"]`` on 2026-04-17
+    produce ``"ai-devops-2026-04-17"``.
+
+    Parameters
+    ----------
+    topics : list[str]
+        Topic slugs used for this run.
+    target_date : date
+        Date of the newsletter edition.
+
+    Returns
+    -------
+    str
+        Filename stem without extension, e.g. ``"ai-devops-2026-04-17"``.
+    """
+    sorted_topics = sorted(topics)
+    return "-".join(sorted_topics) + "-" + target_date.isoformat()
+
+
 # ---------------------------------------------------------------------------
 # Top-level group
 # ---------------------------------------------------------------------------
@@ -354,18 +286,34 @@ def cli() -> None:
     help=f"Path to the YAML configuration file. Defaults to {_DEFAULT_CONFIG}.",
 )
 @click.option(
-    "-e", "--eml",
-    "eml_path",
+    "-t", "--topics",
+    "topics_str",
     default=None,
-    type=click.Path(exists=True, dir_okay=False),
-    help="Path to a local .eml file (skips IMAP fetch).",
+    help=(
+        "Comma-separated list of TLDR topic slugs to fetch, e.g. 'ai,devops'. "
+        f"Supported: {', '.join(SUPPORTED_TOPICS)}."
+    ),
 )
 @click.option(
     "-d", "--date",
     "target_date_str",
     default=None,
     type=click.DateTime(formats=["%Y-%m-%d"]),
-    help="Date to process (YYYY-MM-DD). Ignored when --eml is used. Default: today.",
+    help="Date to process (YYYY-MM-DD). Default: today.",
+)
+@click.option(
+    "-o", "--output-dir",
+    "output_dir_override",
+    default=None,
+    type=click.Path(file_okay=False),
+    help="Directory where the podcast file is written. Overrides config output.dir.",
+)
+@click.option(
+    "--no-interactive",
+    "no_interactive",
+    is_flag=True,
+    default=False,
+    help="Skip the topic-selection prompt; use --topics or config default_topics.",
 )
 @click.option(
     "-n", "--dry-run",
@@ -391,25 +339,18 @@ def cli() -> None:
     default=True,
     help="Generate a report folder (articles, script, links, overview) alongside the podcast.",
 )
-@click.option(
-    "-s", "--status",
-    "status_filter",
-    type=click.Choice(["all", "unseen", "seen"], case_sensitive=False),
-    default="all",
-    show_default=True,
-    help="Filter emails by read status.",
-)
 def run(
     config_path: str | None,
-    eml_path: str | None,
+    topics_str: str | None,
     target_date_str: datetime | None,
+    output_dir_override: str | None,
+    no_interactive: bool,
     dry_run: bool,
     no_progress: bool,
     verbose: bool,
     report: bool,
-    status_filter: str,
 ) -> None:
-    """Convert TLDR newsletter emails into a single two-voice podcast MP3."""
+    """Fetch TLDR newsletters from tldr.tech and generate a two-voice podcast MP3."""
     load_dotenv()
     _setup_logging(verbose)
 
@@ -431,7 +372,7 @@ def run(
         click.echo(f"[ERROR] Configuration error: {exc}", err=True)
         sys.exit(1)
 
-    imap_cfg = cfg.get("imap", {})
+    web_cfg = cfg.get("web", {})
     gemini_cfg = cfg.get("gemini", {})
     scraping_cfg = cfg.get("scraping", {})
     output_cfg = cfg.get("output", {})
@@ -439,13 +380,22 @@ def run(
 
     max_articles: int = scraping_cfg.get("max_articles", 15)
     scrape_timeout: int = scraping_cfg.get("timeout_seconds", 10)
-    output_dir: str = output_cfg.get("directory", "output")
+
+    # Output dir: CLI override > config output.dir > cwd
+    output_dir: str = (
+        output_dir_override
+        or output_cfg.get("dir")
+        or output_cfg.get("directory")
+        or "."
+    )
     output_fmt: str = output_cfg.get("format", "mp3")
 
     speaker1_name: str = gemini_cfg.get("speaker1", {}).get("name", "Alex")
     speaker2_name: str = gemini_cfg.get("speaker2", {}).get("name", "Jordan")
 
-    seen_folder: str = imap_cfg.get("seen_folder", "TLDR/Seen")
+    web_timeout: int = web_cfg.get("timeout_seconds", 15)
+    web_user_agent: str = web_cfg.get("user_agent", "tldr-podcast/1.0")
+    default_topics: list[str] = web_cfg.get("default_topics", ["ai", "infosec", "devops"])
 
     service_tier: str | None = gemini_cfg.get("service_tier") or None
     if service_tier:
@@ -454,61 +404,43 @@ def run(
     tracker = TokenTracker(pricing=pricing_cfg, service_tier=service_tier)
 
     # ------------------------------------------------------------------
-    # 2. Fetch email(s)
+    # 2. Resolve topics
     # ------------------------------------------------------------------
-    imap_message_ids: list[int] = []
-    email_data: list[tuple[int, bytes]] = []
-
-    if eml_path:
-        logger.info("Reading local .eml file: %s", eml_path)
-        email_data = [(0, Path(eml_path).read_bytes())]
-    else:
-        logger.info(
-            "Fetching emails for %s via IMAP (status=%s)…",
-            target_date,
-            status_filter,
-        )
+    if topics_str:
+        raw_topics = [t.strip() for t in topics_str.split(",") if t.strip()]
         try:
-            email_data = fetch_emails(
-                imap_cfg,
-                target_date=target_date,
-                status_filter=status_filter,
-            )
-        except IMAPError as exc:
-            click.echo(f"[ERROR] IMAP error: {exc}", err=True)
+            topics = validate_topics(raw_topics)
+        except ValueError as exc:
+            click.echo(f"[ERROR] {exc}", err=True)
             sys.exit(1)
-
-        if not email_data:
-            click.echo(
-                f"No TLDR emails found for {target_date} (status={status_filter}). Nothing to do."
-            )
-            sys.exit(0)
-
-        email_data = _sort_emails_by_date(email_data)
-
-        if len(email_data) > 1:
-            email_data = _select_emails_interactive(email_data)
-
-        imap_message_ids = [msg_id for msg_id, _ in email_data]
-
-    # ------------------------------------------------------------------
-    # 3. Parse all emails → merge → deduplicate
-    # ------------------------------------------------------------------
-    all_articles: list = []
-
-    for i, (_, raw) in enumerate(email_data, start=1):
-        logger.info("Parsing email %d/%d…", i, len(email_data))
+    elif no_interactive:
         try:
-            articles = parse_emails(raw)
-        except ParseError as exc:
-            click.echo(f"[ERROR] Failed to parse email {i}: {exc}", err=True)
-            continue
-        logger.info("Email %d: %d article(s) extracted.", i, len(articles))
-        all_articles.extend(articles)
+            topics = validate_topics(default_topics)
+        except ValueError as exc:
+            click.echo(f"[ERROR] {exc}", err=True)
+            sys.exit(1)
+    else:
+        topics = _select_topics_interactive(default_topics)
+
+    logger.info("Topics: %s  |  Date: %s", ", ".join(topics), target_date.isoformat())
+
+    # ------------------------------------------------------------------
+    # 3. Fetch newsletters from tldr.tech
+    # ------------------------------------------------------------------
+    logger.info("Fetching TLDR newsletters from tldr.tech…")
+    all_articles: list[Article] = fetch_newsletters(
+        topics,
+        target_date,
+        timeout_seconds=web_timeout,
+        user_agent=web_user_agent,
+    )
 
     if not all_articles:
-        click.echo("No articles extracted from today's emails. Nothing to do.")
-        sys.exit(0)
+        click.echo(
+            f"No articles found for topics {topics} on {target_date}. "
+            "All topics may have been redirected (no edition for this date)."
+        )
+        sys.exit(1)
 
     before_dedup = len(all_articles)
     all_articles = _dedup_articles(all_articles)
@@ -519,11 +451,11 @@ def run(
     logger.info("%d unique article(s) ready for interest ranking.", len(all_articles))
 
     # ------------------------------------------------------------------
-    # 4. Rank → Scrape → Summarize → Dialogue → TTS
+    # 4. Rank → Scrape → Dialogue → TTS
     # ------------------------------------------------------------------
     with _make_progress(disable=no_progress) as progress:
 
-        # 4a. Interest ranking (sorts by apparent interest)
+        # 4a. Interest ranking
         rank_task = progress.add_task(
             f"[cyan]Ranking[/cyan] {len(all_articles)} article(s) by interest…",
             total=1,
@@ -536,7 +468,6 @@ def run(
             task_id=rank_task,
         )
 
-        # Keep only the top max_articles most interesting.
         all_articles = all_articles[:max_articles]
         progress.update(
             rank_task,
@@ -545,7 +476,7 @@ def run(
             ),
         )
 
-        # 4b. Scraping (only the interesting articles)
+        # 4b. Scraping
         scrape_task = progress.add_task(
             f"[cyan]Scraping[/cyan] {len(all_articles)} article(s)…",
             total=len(all_articles),
@@ -630,8 +561,8 @@ def run(
     # ------------------------------------------------------------------
     # 5. Audio export
     # ------------------------------------------------------------------
-    timestamp = datetime.now().strftime("%Y-%m-%d_%H%M")
-    filename = f"tldr_{timestamp}.{output_fmt}"
+    stem = _build_output_stem(topics, target_date)
+    filename = f"{stem}.{output_fmt}"
     out_path = Path(output_dir) / filename
 
     logger.info("Exporting audio to %s…", out_path)
@@ -639,7 +570,7 @@ def run(
     click.echo(f"Podcast saved to: {saved}")
 
     # ------------------------------------------------------------------
-    # 6. Report folder (enabled by default, disable with --no-report)
+    # 6. Report folder
     # ------------------------------------------------------------------
     if link_report is not None:
         report_dir = generate_report(
@@ -647,10 +578,10 @@ def run(
             chunks=chunks,
             link_report=link_report,
             output_dir=output_dir,
-            timestamp=timestamp,
+            timestamp=stem,
             audio_path=saved,
             token_summary=tracker.summary(),
-            email_count=len(email_data),
+            email_count=len(topics),
             target_date=target_date,
         )
         click.echo(f"Report folder saved to: {report_dir}")
@@ -660,25 +591,6 @@ def run(
     # ------------------------------------------------------------------
     click.echo()
     click.echo(tracker.summary())
-
-    # ------------------------------------------------------------------
-    # 8. Move processed emails to the "seen" folder
-    # ------------------------------------------------------------------
-    if imap_message_ids:
-        logger.info(
-            "Moving %d processed email(s) to %s…",
-            len(imap_message_ids),
-            seen_folder,
-        )
-        try:
-            move_emails_to_folder(imap_cfg, imap_message_ids, seen_folder)
-            logger.info("Emails moved to %s.", seen_folder)
-        except IMAPError as exc:
-            logger.warning(
-                "Could not move emails to %s: %s — continuing anyway.",
-                seen_folder,
-                exc,
-            )
 
 
 # ---------------------------------------------------------------------------
@@ -728,17 +640,23 @@ def config_init(output_path: str) -> None:
     click.echo(f"\nConfiguring tldr-podcast → {output_path}\n")
     click.echo("Press Enter to keep the current value shown in brackets.\n")
 
-    # ── IMAP ─────────────────────────────────────────────────────────────
-    click.echo("── IMAP ──────────────────────────────────────────────────────")
-    imap_host     = _prompt("IMAP host",                _get("imap", "host", "imap.gmail.com"))
-    imap_port     = _prompt("IMAP port",                _get("imap", "port", "993"))
-    imap_username = _prompt("IMAP username (email)",    _get("imap", "username"))
-    imap_pass_env = _prompt(
-        "Env var for IMAP password",
-        _get("imap", "password_env", "IMAP_PASSWORD"),
+    # ── Web source ────────────────────────────────────────────────────────
+    click.echo("── Web source ────────────────────────────────────────────────")
+    existing_default_topics = existing.get("web", {}).get(
+        "default_topics", ["ai", "infosec", "devops"]
     )
-    imap_folder      = _prompt("IMAP folder to watch",  _get("imap", "folder", "INBOX"))
-    imap_seen_folder = _prompt("Folder for processed emails", _get("imap", "seen_folder", "TLDR/Seen"))
+    default_topics_str = _prompt(
+        f"Default topics (comma-separated, supported: {', '.join(SUPPORTED_TOPICS)})",
+        ",".join(existing_default_topics) if isinstance(existing_default_topics, list) else str(existing_default_topics),
+    )
+    web_user_agent = _prompt(
+        "User-Agent header",
+        _get("web", "user_agent", "tldr-podcast/1.0"),
+    )
+    web_timeout = _prompt(
+        "HTTP timeout (seconds)",
+        _get("web", "timeout_seconds", "15"),
+    )
 
     # ── Gemini ────────────────────────────────────────────────────────────
     click.echo("\n── Gemini ────────────────────────────────────────────────────")
@@ -756,35 +674,39 @@ def config_init(output_path: str) -> None:
 
     # ── Speakers ──────────────────────────────────────────────────────────
     click.echo("\n── Speaker 1 ─────────────────────────────────────────────────")
-    sp1_name  = _prompt("Name",        _get("gemini", "speaker1", {}).get("name", "Alex") if isinstance(_get("gemini", "speaker1", {}), dict) else "Alex")
-    sp1_voice = _prompt(f"Voice ({', '.join(_GEMINI_VOICES)})", _get("gemini", "speaker1", {}).get("voice", "Puck") if isinstance(_get("gemini", "speaker1", {}), dict) else "Puck")
+    sp1 = existing.get("gemini", {}).get("speaker1", {}) if isinstance(existing.get("gemini", {}).get("speaker1"), dict) else {}
+    sp1_name  = _prompt("Name",        sp1.get("name", "Alex"))
+    sp1_voice = _prompt(f"Voice ({', '.join(_GEMINI_VOICES)})", sp1.get("voice", "Puck"))
     sp1_personality = _prompt(
         "Personality",
-        existing.get("gemini", {}).get("speaker1", {}).get("personality", "enthusiastic, curious, quick to get excited about tech innovations") if isinstance(existing.get("gemini", {}).get("speaker1"), dict) else "enthusiastic, curious, quick to get excited about tech innovations",
+        sp1.get("personality", "enthusiastic, curious, quick to get excited about tech innovations"),
     )
 
     click.echo("\n── Speaker 2 ─────────────────────────────────────────────────")
-    sp2_name  = _prompt("Name",        existing.get("gemini", {}).get("speaker2", {}).get("name", "Jordan") if isinstance(existing.get("gemini", {}).get("speaker2"), dict) else "Jordan")
-    sp2_voice = _prompt(f"Voice ({', '.join(_GEMINI_VOICES)})", existing.get("gemini", {}).get("speaker2", {}).get("voice", "Charon") if isinstance(existing.get("gemini", {}).get("speaker2"), dict) else "Charon")
+    sp2 = existing.get("gemini", {}).get("speaker2", {}) if isinstance(existing.get("gemini", {}).get("speaker2"), dict) else {}
+    sp2_name  = _prompt("Name",        sp2.get("name", "Jordan"))
+    sp2_voice = _prompt(f"Voice ({', '.join(_GEMINI_VOICES)})", sp2.get("voice", "Charon"))
     sp2_personality = _prompt(
         "Personality",
-        existing.get("gemini", {}).get("speaker2", {}).get("personality", "analytical, mildly skeptical, adds nuance and historical context") if isinstance(existing.get("gemini", {}).get("speaker2"), dict) else "analytical, mildly skeptical, adds nuance and historical context",
+        sp2.get("personality", "analytical, mildly skeptical, adds nuance and historical context"),
     )
 
     # ── Output ────────────────────────────────────────────────────────────
     click.echo("\n── Output ────────────────────────────────────────────────────")
-    output_dir = _prompt("Output directory", _get("output", "directory", "output"))
+    output_dir = _prompt(
+        "Output directory",
+        existing.get("output", {}).get("dir") or existing.get("output", {}).get("directory") or ".",
+    )
     output_fmt = _prompt("Format (mp3/wav)",  _get("output", "format", "mp3"))
 
     # ── Build config dict ─────────────────────────────────────────────────
+    parsed_default_topics = [t.strip() for t in default_topics_str.split(",") if t.strip()]
+
     cfg: dict = {
-        "imap": {
-            "host": imap_host,
-            "port": int(imap_port),
-            "username": imap_username,
-            "password_env": imap_pass_env,
-            "folder": imap_folder,
-            "seen_folder": imap_seen_folder,
+        "web": {
+            "default_topics": parsed_default_topics,
+            "user_agent": web_user_agent,
+            "timeout_seconds": int(web_timeout),
         },
         "gemini": {
             "api_key_env": gemini_key_env,
@@ -804,7 +726,7 @@ def config_init(output_path: str) -> None:
         },
         "scraping": existing.get("scraping", {"max_articles": 15, "timeout_seconds": 10}),
         "output": {
-            "directory": output_dir,
+            "dir": output_dir,
             "format": output_fmt,
         },
         "pricing": existing.get("pricing", {}),
@@ -812,7 +734,7 @@ def config_init(output_path: str) -> None:
     if gemini_tier.strip():
         cfg["gemini"]["service_tier"] = gemini_tier.strip()
 
-    # Preserve pricing block from existing config or example if empty
+    # Preserve pricing block from example config if empty
     if not cfg["pricing"]:
         example = Path(__file__).parent.parent.parent / "config.example.yaml"
         if example.exists():
@@ -826,11 +748,8 @@ def config_init(output_path: str) -> None:
         encoding="utf-8",
     )
     click.echo(f"\nConfiguration written to {dest}")
-
-    # Remind the user to export the env vars
     click.echo(
-        f"\nMake sure these environment variables are set before running:\n"
-        f"  export {imap_pass_env}=<your IMAP password>\n"
+        f"\nMake sure this environment variable is set before running:\n"
         f"  export {gemini_key_env}=<your Gemini API key>"
     )
 

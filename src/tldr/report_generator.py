@@ -3,7 +3,7 @@ Report generator for TLDR podcast runs.
 
 Creates a timestamped output folder for each generation containing:
 
-- ``overview.md`` — generation metadata: date, email count, article count,
+- ``overview.md`` — generation metadata: date, topics, article count,
   sections covered, audio path, and token/cost summary.
 - ``articles.md`` — selected articles with title, section, URL, summary,
   and full text when available.
@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from tldr.email_parser import Article
+    from tldr.models import Article
     from tldr.link_extractor import CategorisedLink, LinkReport
     from tldr.llm_summarizer import DialogueChunk
 
@@ -36,7 +36,7 @@ def _render_overview(
     link_report: LinkReport,
     audio_path: Path | str | None = None,
     token_summary: str | None = None,
-    email_count: int = 0,
+    topics: list[str] | None = None,
     target_date: date | None = None,
 ) -> str:
     """
@@ -54,8 +54,8 @@ def _render_overview(
         Path to the generated audio file.
     token_summary : str or None
         Human-readable token/cost summary from :class:`~tldr.token_tracker.TokenTracker`.
-    email_count : int
-        Number of source emails processed.
+    topics : list[str] or None
+        TLDR topics fetched to build the podcast.
     target_date : date or None
         Date the podcast covers.
 
@@ -72,7 +72,7 @@ def _render_overview(
     lines.append("|---|---|")
     if target_date:
         lines.append(f"| Date | {target_date.isoformat()} |")
-    lines.append(f"| Emails processed | {email_count} |")
+    lines.append(f"| Topics | {', '.join(topics) if topics else 'N/A'} |")
     lines.append(f"| Articles selected | {len(articles)} |")
     lines.append(f"| Sections | {', '.join(sections) if sections else 'N/A'} |")
     lines.append(f"| Dialogue chunks | {len(chunks)} |")
@@ -289,7 +289,7 @@ def generate_report(
     timestamp: str,
     audio_path: Path | str | None = None,
     token_summary: str | None = None,
-    email_count: int = 0,
+    topics: list[str] | None = None,
     target_date: date | None = None,
 ) -> Path:
     """
@@ -316,8 +316,8 @@ def generate_report(
         Path to the generated audio file (shown in the overview).
     token_summary : str or None
         Human-readable token/cost summary from the token tracker.
-    email_count : int
-        Number of source emails processed.
+    topics : list[str] or None
+        TLDR topics fetched to build the podcast.
     target_date : date or None
         Date the podcast covers.
 
@@ -347,7 +347,7 @@ def generate_report(
             articles, chunks, link_report,
             audio_path=audio_path,
             token_summary=token_summary,
-            email_count=email_count,
+            topics=topics,
             target_date=target_date,
         ),
         encoding="utf-8",

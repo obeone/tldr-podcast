@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from tldr.cli import _dedup_articles
-from tldr.email_parser import Article
+from tldr.models import Article
 
 
 def _make_article(title: str, url: str = "https://example.com") -> Article:
