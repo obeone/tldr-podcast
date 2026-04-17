@@ -3,50 +3,48 @@
 ![Python](https://img.shields.io/badge/Python-3.13+-blue?logo=python&logoColor=white)
 ![Gemini](https://img.shields.io/badge/Gemini-Flash%20%7C%20TTS-4285F4?logo=google&logoColor=white)
 ![ffmpeg](https://img.shields.io/badge/ffmpeg-required-green?logo=ffmpeg&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-176%20passed-brightgreen)
 
-Converts TLDR newsletters into a two-voice podcast MP3 using Gemini AI.
+Fetches TLDR newsletters directly from [tldr.tech](https://tldr.tech) and converts them into
+a two-voice podcast MP3 using Gemini AI.
 
 ---
 
-## 🏗️ Architecture
+## Architecture
 
 ```mermaid
 flowchart TB
-    IN[📧 IMAP / .eml file] --> EP[Email Parser<br>sponsor filter]
-    EP --> RANK[Interest Ranking<br>LLM scores 1–10]
+    IN["🌐 tldr.tech/<topic>/<date>"] --> WEB["Web Source<br>BeautifulSoup parser<br>sponsor filter · dedup"]
+    WEB --> RANK["Interest Ranking<br>LLM scores 1–10"]
 
-    RANK --> WS[Web Scraper<br>trafilatura]
+    RANK --> WS["Web Scraper<br>trafilatura"]
+    WS --> LE["Link Extractor<br>repos · models · papers"]
 
-    WS --> LLM[Script Writer<br>Gemini Flash]
-    WS --> LE[Link Extractor<br>repos · models · papers]
+    WS --> LLM["Script Writer<br>Gemini Flash"]
+    LLM --> DC["Dialogue chunks<br>≤ 3 000 bytes"]
 
-    LLM --> DC[Dialogue chunks<br>≤ 3 000 bytes]
-
-    DC --> TTS[TTS Generator<br>Gemini multi-speaker]
-    DC --> RPT[📊 Report Generator]
+    DC --> TTS["TTS Generator<br>Gemini multi-speaker"]
+    DC --> RPT["📊 Report Generator"]
     LE --> RPT
 
-    TTS --> AE[Audio Exporter<br>pydub + ffmpeg]
+    TTS --> AE["Audio Exporter<br>pydub + ffmpeg"]
 
-    AE --> MP3[🎙️ .mp3]
-    RPT --> OUT[📂 overview · articles · script · links]
+    AE --> MP3["🎙️ .mp3"]
+    RPT --> OUT["📂 overview · articles · script · links"]
 ```
 
 ---
 
-## ✨ Features
+## Features
 
 | Feature | Details |
 | --- | --- |
-| 📬 IMAP fetch | Retrieves TLDR emails via SSL (all/unseen/seen), moves processed emails to a configurable folder |
-| 📅 Date filter | Deduplicates emails per day with `--date YYYY-MM-DD` |
-| 🗂️ Email selection | Interactive picker when multiple emails match — choose which to include |
-| 🔖 Status filter | `--status all\|unseen\|seen` to filter by read status (default: all) |
-| 🚫 Sponsor filter | Strips `TOGETHER WITH`, `SPONSOR`, ads |
-| 🌐 Article scraping | Full text via trafilatura, fallback to summary |
+| 🌐 Web source | Fetches newsletters directly from `tldr.tech/<topic>/<YYYY-MM-DD>` — no account needed |
+| 📅 Multi-topic | Combine topics like `ai,devops,infosec` in one podcast |
+| 🗂️ Interactive picker | `questionary` checkbox lets you pick topics interactively |
+| 🚫 Sponsor filter | Strips `TOGETHER WITH`, `SPONSOR`, promo sections and UTM-tagged URLs |
+| 🌐 Article scraping | Full text via trafilatura, fallback to newsletter summary |
 | 🔗 Link extraction | Categorises URLs into repos, models, papers, sources |
-| 🎯 Interest ranking | LLM scores articles 1–10 by interest before scraping; top `max_articles` are kept |
+| 🎯 Interest ranking | LLM scores articles 1–10 by interest before scraping; top `max_articles` kept |
 | 📄 Full-text pipeline | Scraped full text sent directly to the script writer for maximum dialogue quality |
 | ⚡ Service tiers | Support for `flex` (cheaper) and `priority` (faster) API tiers |
 | 🎙️ Two-voice TTS | Configurable speaker names, voices, and personalities |
@@ -55,13 +53,12 @@ flowchart TB
 | 📊 Report generation | Enabled by default — creates a timestamped folder with overview, articles, script, and links (`--no-report` to disable) |
 | 💰 Token tracking | Real-time token usage and cost display on progress bars, tier-aware pricing |
 | 🔍 Dry-run mode | Print dialogue without calling TTS |
-| 📂 Local .eml mode | Test with a saved email, no IMAP required |
 | 🔄 Retry logic | Automatic retry with backoff for transient API failures |
 | 🛠️ Config wizard | Interactive `config init` to bootstrap your configuration |
 
 ---
 
-## 📦 Installation
+## Installation
 
 ### Prerequisites
 
@@ -92,32 +89,28 @@ uv sync && uv pip install -e .
 
 ---
 
-## ⚙️ Configuration
+## Configuration
 
 The default configuration file is `$XDG_CONFIG_HOME/tldr/config.yaml`
 (falls back to `~/.config/tldr/config.yaml` when `XDG_CONFIG_HOME` is unset).
 
-Run the interactive wizard to create it — it guides you through each
-setting and writes the file in the right place:
+Run the interactive wizard to create it:
 
 ```bash
 tldr-podcast config init
 ```
 
-Alternatively, copy the example and edit manually:
+Or copy the example and edit manually:
 
 ```bash
 cp config.example.yaml "${XDG_CONFIG_HOME:-$HOME/.config}/tldr/config.yaml"
 ```
 
 ```yaml
-imap:
-  host: imap.gmail.com
-  port: 993
-  username: your@email.com
-  password_env: IMAP_PASSWORD   # name of env var holding the password
-  folder: INBOX
-  seen_folder: TLDR/Seen        # folder for processed emails
+web:
+  default_topics: [ai, infosec, devops]   # pre-checked in interactive mode
+  user_agent: "tldr-podcast/1.0"
+  timeout_seconds: 15
 
 gemini:
   api_key_env: GEMINI_API_KEY   # name of env var holding the API key
@@ -142,32 +135,20 @@ gemini:
   tts_style:
     pace: "slow and deliberate"
     scene: "Two friends co-hosting a casual French tech podcast in a cozy studio"
-    temperature: 1.2             # expressiveness (0.0–2.0)
+    temperature: 1.2
 
 scraping:
   max_articles: 15
   timeout_seconds: 10
 
 output:
-  directory: output
-  format: mp3                    # mp3 or wav
+  dir: "."       # override per-run with --output-dir
+  format: mp3    # mp3 or wav
 
-pricing:                         # USD per 1M tokens (for cost tracking)
-  # Flat format (no tiers):
+pricing:         # USD per 1M tokens (for cost tracking)
   gemini-2.0-flash:
     input_per_1m: 0.10
     output_per_1m: 0.40
-  # Tier-aware format:
-  gemini-2.5-flash:
-    standard:
-      input_per_1m: 0.30
-      output_per_1m: 2.50
-    flex:
-      input_per_1m: 0.15
-      output_per_1m: 1.25
-    priority:
-      input_per_1m: 0.54
-      output_per_1m: 4.50
   gemini-2.5-flash-preview-tts:
     input_per_1m: 0.50
     output_per_1m: 10.00
@@ -181,107 +162,137 @@ secrets are never stored in the file.
 | Variable | Description |
 | --- | --- |
 | `GEMINI_API_KEY` | Gemini API key (Google AI Studio) |
-| `IMAP_PASSWORD` | IMAP account password |
 
-Export them or add to a `.env` file:
+Export it or add to a `.env` file:
 
 ```bash
 export GEMINI_API_KEY="your-key"
-export IMAP_PASSWORD="your-password"
 ```
 
 ---
 
-## 🚀 Usage
+## Usage
+
+### Supported Topics
+
+`ai` · `infosec` · `tech` · `crypto` · `founders` · `dev` · `it` · `design` · `product` · `devops` · `marketing` · `data` · `fintech`
 
 ### CLI Commands
 
-All `run` commands use `$XDG_CONFIG_HOME/tldr/config.yaml` by default
-(falling back to `~/.config/tldr/config.yaml`). Pass
-`--config path/to/config.yaml` to override.
+All `run` commands use `$XDG_CONFIG_HOME/tldr/config.yaml` by default.
+Pass `--config path/to/config.yaml` to override.
 
 | Command | Description |
 | --- | --- |
-| `tldr-podcast run` | Fetch emails via IMAP and generate podcast + report |
-| `tldr-podcast run -s unseen` | Only process unread emails |
-| `tldr-podcast run -s seen` | Only process already-read emails |
-| `tldr-podcast run -e file.eml` | Use a local `.eml` file |
-| `tldr-podcast run -d 2026-03-15` | Target a specific date |
-| `tldr-podcast run -e file.eml -n` | Print dialogue only, no TTS (dry-run) |
+| `tldr-podcast run` | Interactive topic picker then generate podcast |
+| `tldr-podcast run -t ai,devops` | Fetch specific topics, skip prompt |
+| `tldr-podcast run -t infosec --no-interactive` | Non-interactive, explicit topics |
+| `tldr-podcast run -d 2026-04-06` | Target a specific date |
+| `tldr-podcast run -t ai -n` | Dry-run: print dialogue only, no TTS |
 | `tldr-podcast run -R` | Skip report generation (`--no-report`) |
+| `tldr-podcast run -o ./podcasts` | Write output to a specific directory |
 | `tldr-podcast run --no-progress` | Disable rich progress bar |
 | `tldr-podcast run -v` | Enable DEBUG logging |
 | `tldr-podcast config init` | Interactive configuration wizard |
 | `tldr-podcast config show` | Display the current configuration |
 | `tldr-podcast config show --resolve` | Display config with resolved env vars (masked) |
 
-**Short flags:** `-c` config, `-e` eml, `-d` date, `-s` status, `-n` dry-run, `-v` verbose, `-r`/`-R` report/no-report, `-h` help.
+**Short flags:** `-c` config, `-t` topics, `-d` date, `-o` output-dir, `-n` dry-run, `-v` verbose, `-r`/`-R` report/no-report, `-h` help.
 
-### Example — dry-run on a saved email
+### Output Naming
 
-```bash
-tldr-podcast run -e "mails/Gemini 3.1 Pro.eml" -n
+The podcast filename is built from the topics (sorted alphabetically) and the date:
+
+```
+ai-devops-2026-04-17.mp3
+ai-devops-2026-04-17/overview.md
+ai-devops-2026-04-17/articles.md
+ai-devops-2026-04-17/script.md
+ai-devops-2026-04-17/summary.md
 ```
 
-### Example — full pipeline (report is generated by default)
+`ai,devops` and `devops,ai` produce the same filename.
+
+### Example — dry-run on today's AI and infosec newsletters
 
 ```bash
-tldr-podcast run -e "mails/newsletter.eml"
-# → output/tldr_2026-02-22_1430.mp3
-# → output/tldr_2026-02-22_1430/overview.md    (metadata, sections, token costs)
-# → output/tldr_2026-02-22_1430/articles.md    (titles, summaries, full text)
-# → output/tldr_2026-02-22_1430/script.md      (dialogue script)
-# → output/tldr_2026-02-22_1430/summary.md     (categorised links)
+tldr-podcast run --topics ai,infosec --no-interactive --dry-run
+```
+
+### Example — full pipeline with report
+
+```bash
+tldr-podcast run -t ai,devops -d 2026-04-17
+# → ./ai-devops-2026-04-17.mp3
+# → ./ai-devops-2026-04-17/overview.md
+# → ./ai-devops-2026-04-17/articles.md
+# → ./ai-devops-2026-04-17/script.md
+# → ./ai-devops-2026-04-17/summary.md
 ```
 
 ---
 
-## 🧪 Tests
+## Tests
 
 ```bash
 uv run pytest tests/ -v
 ```
 
-176 unit tests covering every module. All external APIs are mocked.
+All external APIs (Gemini, HTTP) are mocked. A real captured TLDR HTML page
+lives in `tests/fixtures/` and is used by `test_web_source.py` for
+realistic parse validation.
 
 ---
 
-## 🗂️ Project Structure
+## Project Structure
 
 ```text
 tldr-podcast/
 ├── config.example.yaml        # Documented configuration template
 ├── pyproject.toml
 ├── src/tldr/
-│   ├── cli.py                 # Click CLI entry point (group with subcommands)
+│   ├── cli.py                 # Click CLI entry point
 │   ├── config.py              # YAML loader with *_env resolution
-│   ├── imap_client.py         # IMAP SSL client
-│   ├── email_parser.py        # MIME parser → Article dataclass list
-│   ├── web_scraper.py         # trafilatura scraper with fallback
+│   ├── models.py              # Shared Article dataclass
+│   ├── web_source.py          # tldr.tech HTML fetcher + parser
+│   ├── web_scraper.py         # trafilatura full-text scraper
 │   ├── link_extractor.py      # URL extraction and categorisation
-│   ├── llm_summarizer.py      # Interest ranking + per-article summary + dialogue
+│   ├── llm_summarizer.py      # Interest ranking + dialogue generation
 │   ├── tts_generator.py       # Gemini multi-speaker TTS
 │   ├── audio_exporter.py      # PCM → MP3/WAV via pydub
 │   ├── report_generator.py    # Timestamped report folder output
 │   ├── token_tracker.py       # Token usage and cost tracking
 │   └── retry.py               # Retry with exponential backoff
-├── tests/                     # 176 pytest unit tests (14 files)
-└── mails/                     # Sample .eml files for testing
+├── tests/
+│   ├── fixtures/              # Real captured HTML for parse tests
+│   └── ...                    # pytest unit tests (all APIs mocked)
+└── mails/                     # Legacy sample files (not used by pipeline)
 ```
 
 ---
 
-## 📝 Notes
+## Notes
 
-- Gemini TTS outputs raw PCM (24 kHz, mono, 16-bit). ffmpeg is required
-  for MP3 encoding.
-- The TTS API has a ~4 000-byte text limit per call. The dialogue generator
-  automatically splits output at speaker-turn boundaries (≤ 3 000 bytes/chunk).
-- Sponsor sections (`TOGETHER WITH`, `SPONSOR`, etc.) are filtered out
-  before article selection.
+- Gemini TTS outputs raw PCM (24 kHz, mono, 16-bit). ffmpeg is required for MP3 encoding.
+- The TTS API has a ~4 000-byte text limit per call. The dialogue generator automatically
+  splits output at speaker-turn boundaries (≤ 3 000 bytes/chunk).
+- Sponsor sections (`TOGETHER WITH`, `SPONSOR`, `PROMOTION`) and articles with
+  `utm_medium=sponsor` in their URL or `(Sponsor)` in their title are filtered out
+  automatically.
 - Token costs are tracked live and displayed at the end of each run.
-- Pricing supports both flat and tier-aware formats — the active tier is
-  selected by `gemini.service_tier` in your config.
+- Pricing supports both flat and tier-aware formats — the active tier is selected by
+  `gemini.service_tier` in your config.
+
+---
+
+## Changelog
+
+### v1.0.0 — Web-only pipeline (breaking change)
+
+Switched from IMAP/email-based fetching to direct web scraping of
+[tldr.tech](https://tldr.tech).  No account or email credentials are needed.
+The `-e/--eml`, `-s/--status` CLI flags, and the `imap:` config section have
+been removed.  Use `--topics` and `--no-interactive` instead.
 
 ---
 
