@@ -43,18 +43,18 @@ class TestEnvVarResolution:
         assert "api_key_env" not in cfg["service"]
 
     def test_nested_env_key_resolved(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("IMAP_PASS", "hunter2")
+        monkeypatch.setenv("MY_SECRET", "hunter2")
         cfg_file = write_yaml(
             tmp_path,
             """
-            imap:
-              host: imap.example.com
-              password_env: IMAP_PASS
+            backend:
+              host: example.com
+              token_env: MY_SECRET
             """,
         )
         cfg = load_config(cfg_file)
-        assert cfg["imap"]["password"] == "hunter2"
-        assert "password_env" not in cfg["imap"]
+        assert cfg["backend"]["token"] == "hunter2"
+        assert "token_env" not in cfg["backend"]
 
     def test_multiple_env_keys_resolved(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("KEY_A", "value_a")

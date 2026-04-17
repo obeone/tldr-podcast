@@ -90,8 +90,8 @@ def load_config(path: str | Path) -> dict[str, Any]:
     Examples
     --------
     >>> cfg = load_config("config.yaml")
-    >>> cfg["imap"]["host"]
-    'imap.gmail.com'
+    >>> cfg["web"]["default_topics"]
+    ['ai', 'infosec', 'devops']
     """
     config_path = Path(path)
     if not config_path.exists():
