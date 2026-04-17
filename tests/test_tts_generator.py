@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from tldr.tts_generator import generate_audio_chunks
 

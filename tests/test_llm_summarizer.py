@@ -10,7 +10,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from tldr.llm_summarizer import DialogueChunk, generate_dialogue
 

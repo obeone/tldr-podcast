@@ -8,11 +8,10 @@ non-retryable errors are re-raised immediately.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from google.genai import errors as genai_errors
-from tenacity import RetryError
 
 from tldr.llm_summarizer import generate_dialogue
 from tldr.tts_generator import generate_audio_chunks

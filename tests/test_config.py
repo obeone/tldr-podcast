@@ -1,6 +1,5 @@
 """Tests for src/tldr/config.py."""
 
-import os
 import textwrap
 from pathlib import Path
 

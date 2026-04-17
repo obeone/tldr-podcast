@@ -11,7 +11,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from tldr.llm_summarizer import (
     _parse_rankings,

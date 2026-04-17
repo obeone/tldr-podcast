@@ -6,10 +6,9 @@ Verifies article scraping behaviour with mocked trafilatura calls.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from unittest.mock import patch
 
-import pytest
 
 from tldr.web_scraper import scrape_article, scrape_articles
 
