@@ -94,7 +94,8 @@ uv sync && uv pip install -e .
 
 ## ⚙️ Configuration
 
-The default configuration file is `~/.config/tldr/config.yaml`.
+The default configuration file is `$XDG_CONFIG_HOME/tldr/config.yaml`
+(falls back to `~/.config/tldr/config.yaml` when `XDG_CONFIG_HOME` is unset).
 
 Run the interactive wizard to create it — it guides you through each
 setting and writes the file in the right place:
@@ -106,7 +107,7 @@ tldr-podcast config init
 Alternatively, copy the example and edit manually:
 
 ```bash
-cp config.example.yaml ~/.config/tldr/config.yaml
+cp config.example.yaml "${XDG_CONFIG_HOME:-$HOME/.config}/tldr/config.yaml"
 ```
 
 ```yaml
@@ -195,7 +196,8 @@ export IMAP_PASSWORD="your-password"
 
 ### CLI Commands
 
-All `run` commands use `~/.config/tldr/config.yaml` by default. Pass
+All `run` commands use `$XDG_CONFIG_HOME/tldr/config.yaml` by default
+(falling back to `~/.config/tldr/config.yaml`). Pass
 `--config path/to/config.yaml` to override.
 
 | Command | Description |

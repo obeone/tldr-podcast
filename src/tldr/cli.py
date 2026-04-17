@@ -9,7 +9,7 @@ Commands
 
 Run options
 -----------
---config       Path to the YAML configuration file (default: ~/.config/tldr/config.yaml).
+--config       Path to the YAML configuration file (default: $XDG_CONFIG_HOME/tldr/config.yaml).
 --eml          Path to a local .eml file (skips IMAP fetch when provided).
 --date         Date to process in YYYY-MM-DD format (default: today).
 --dry-run      Print the generated dialogue to stdout instead of calling TTS.
@@ -60,7 +60,13 @@ logger = logging.getLogger(__name__)
 
 console = Console(stderr=False)
 
-_DEFAULT_CONFIG = Path.home() / ".config" / "tldr" / "config.yaml"
+def _xdg_config_home() -> Path:
+    """Return ``$XDG_CONFIG_HOME`` or its default (``~/.config``)."""
+    value = os.environ.get("XDG_CONFIG_HOME")
+    return Path(value) if value else Path.home() / ".config"
+
+
+_DEFAULT_CONFIG = _xdg_config_home() / "tldr" / "config.yaml"
 
 _GEMINI_VOICES = [
     "Puck", "Charon", "Kore", "Fenrir", "Aoede",
