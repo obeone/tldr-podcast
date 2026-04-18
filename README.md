@@ -18,6 +18,8 @@ required.
 - **13 topics** — `ai`, `infosec`, `devops`, `tech`, `crypto`, `founders`, `dev`, `it`, `design`, `product`, `marketing`, `data`, `fintech`
 - **Smart curation** — LLM interest-scores articles 1–10 before scraping; only the best make the cut
 - **Two-voice dialogue** — configurable speaker names, voices (Gemini TTS), personalities, and language
+- **Audio tags (Gemini 3.x Flash TTS)** — the dialogue LLM inserts inline English cues like `[laughs]`, `[short pause]`, `[enthusiasm]` where pertinent for more expressive delivery; falls back to French parenthetical cues on older TTS models
+- **Versioned config with auto-upgrade** — missing keys are added in place when the schema evolves; the previous file is kept as `config.yaml.v<old>.bak`
 - **Report generation** — per-run folder with overview, full article list, script, and extracted links (repos, papers, models)
 - **Flexible output** — MP3 or WAV, custom output directory
 - **Token cost tracking** — live usage and cost estimate at the end of every run
@@ -211,6 +213,7 @@ tldr-podcast/
 ├── src/tldr/
 │   ├── cli.py                 # Click CLI (run · config · completions)
 │   ├── config.py              # YAML loader with *_env resolution
+│   ├── config_migrations.py   # Versioned schema + in-place auto-upgrade
 │   ├── models.py              # Shared Article dataclass
 │   ├── web_source.py          # tldr.tech fetcher + parser
 │   ├── web_scraper.py         # trafilatura full-text scraper
@@ -229,6 +232,13 @@ tldr-podcast/
 ---
 
 ## Changelog
+
+### v1.4.0
+Audio-tag support for Gemini 3.x Flash TTS: the dialogue LLM is now prompted
+to sprinkle inline English cues (`[laughs]`, `[short pause]`, `[enthusiasm]`,
+…) when the configured `tts_model` supports them. Override with
+`gemini.tts_style.audio_tags: auto|on|off`. Adds a versioned config schema
+(`config_version`) with in-place auto-upgrade and backup.
 
 ### v1.3.0
 Shell completion support via `tldr-podcast completions bash|zsh|fish`.

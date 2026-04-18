@@ -60,11 +60,12 @@ web_source (topics, date) → interest_ranking → web_scraper → llm_dialogue 
 
 **`src/tldr/` modules:**
 
-- `config.py` — Loads `config.yaml` via `load_config()`. Keys ending in `_env` are replaced at runtime by the named environment variable value (e.g. `api_key_env: GEMINI_API_KEY` becomes `api_key: <value of $GEMINI_API_KEY>`).
+- `config.py` — Loads `config.yaml` via `load_config()`. Keys ending in `_env` are replaced at runtime by the named environment variable value (e.g. `api_key_env: GEMINI_API_KEY` becomes `api_key: <value of $GEMINI_API_KEY>`). On load, an out-of-date file is auto-upgraded to `CURRENT_CONFIG_VERSION` (previous copy saved next to it as `<name>.v<old>.bak`).
+- `config_migrations.py` — Versioned schema upgrade system. Bump `CURRENT_CONFIG_VERSION` and append a `(from_version, migrate_fn)` tuple to `MIGRATIONS` whenever new keys must be added to existing configs.
 - `models.py` — Shared dataclasses (`Article`) consumed by every pipeline stage.
 - `web_source.py` — Fetches `https://tldr.tech/<topic>/<YYYY-MM-DD>` for each requested topic, parses the HTML with BeautifulSoup, skips redirected URLs silently (no edition for that date), dedupes articles across topics, and filters sponsor/promo sections. Returns `list[Article]`.
 - `web_scraper.py` — Fetches full article text via trafilatura; falls back to the newsletter summary if scraping fails. Populates `Article.full_text`.
-- `llm_summarizer.py` — Two-stage LLM module: (1) `rank_articles_by_interest()` scores articles 1–10 by title+summary to select the most interesting before scraping; (2) `generate_dialogue()` produces a two-host dialogue script from full article text, split into `DialogueChunk` objects bounded to ≤3000 UTF-8 bytes each.
+- `llm_summarizer.py` — Two-stage LLM module: (1) `rank_articles_by_interest()` scores articles 1–10 by title+summary to select the most interesting before scraping; (2) `generate_dialogue()` produces a two-host dialogue script from full article text, split into `DialogueChunk` objects bounded to ≤3000 UTF-8 bytes each. The prompt instructs the LLM to insert inline delivery cues where pertinent — either English bracketed audio tags (`[laughs]`, `[short pause]`, `[enthusiasm]`, …) when `tts_model` supports them, or French parenthetical cues otherwise. Auto-detection keys on `tts_model` starting with `gemini-3`; override via `gemini.tts_style.audio_tags: auto|on|off`.
 - `tts_generator.py` — Calls Gemini multi-speaker TTS for each `DialogueChunk`; returns raw PCM bytes (24 kHz, mono, 16-bit LE).
 - `audio_exporter.py` — Concatenates PCM chunks and encodes to MP3 or WAV via pydub + ffmpeg.
 - `report_generator.py` — Writes `overview.md`, `articles.md`, `script.md`, `summary.md` in a folder named after the podcast stem.
@@ -87,9 +88,21 @@ Output filename is `<topic1>-<topic2>-…-<YYYY-MM-DD>.<fmt>` (topics sorted alp
 
 Default config path is `$XDG_CONFIG_HOME/tldr/config.yaml` (falls back to `~/.config/tldr/config.yaml`). Run `tldr-podcast config init` to create it interactively. Secrets are never stored directly — use `_env`-suffixed keys that reference environment variable names. Required env var: `GEMINI_API_KEY`.
 
+The file carries a top-level `config_version` key. When a new build adds keys, `load_config()` applies the migration chain from `config_migrations.py` in place and backs up the old file to `<name>.v<old>.bak`. Inline YAML comments are dropped on upgrade — edit the freshly written file afterwards if you had notes to preserve.
+
 ## Testing
 
 All tests use mocks for external APIs (Gemini, HTTP). The TLDR HTML fixture under `tests/fixtures/` is a real captured page used by `test_web_source.py`. See `uv run pytest tests/ -q` for the current count.
+
+## Documentation
+
+Any new feature exposed to the user (new CLI flag, subcommand, config key, output format, or behaviour change) **must** be documented in the same commit that introduces it. Update whichever of the following are affected:
+
+- `README.md` — user-facing usage, flags, examples
+- `CLAUDE.md` — architecture, CLI flags summary, config keys, key data types
+- Inline `--help` text in `cli.py`
+
+No feature lands without its docs. Docs-only fixes (typos, clarifications) do not require a version bump.
 
 ## Versioning
 
