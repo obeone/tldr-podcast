@@ -15,6 +15,7 @@ Run options
 --output-dir      Directory where the podcast file is written (overrides config).
 --no-interactive  Skip the topic-selection checkbox prompt.
 --dry-run         Print the generated dialogue to stdout instead of calling TTS.
+--no-audio        Generate the script and report but skip TTS and audio export.
 --no-progress     Disable the rich progress bar.
 --verbose         Enable DEBUG-level logging.
 --no-report       Disable the report folder generated alongside the podcast.
@@ -358,6 +359,13 @@ def cli() -> None:
     help="Print generated dialogue to stdout instead of synthesising audio.",
 )
 @click.option(
+    "-A", "--no-audio",
+    "no_audio",
+    is_flag=True,
+    default=False,
+    help="Generate the dialogue script and report, but skip TTS synthesis and audio export.",
+)
+@click.option(
     "--no-progress",
     "no_progress",
     is_flag=True,
@@ -382,6 +390,7 @@ def run(
     output_dir_override: str | None,
     no_interactive: bool,
     dry_run: bool,
+    no_audio: bool,
     no_progress: bool,
     verbose: bool,
     report: bool,
@@ -395,7 +404,7 @@ def run(
     # ------------------------------------------------------------------
     # 0. Preflight checks
     # ------------------------------------------------------------------
-    if not dry_run:
+    if not dry_run and not no_audio:
         _check_ffmpeg()
 
     # ------------------------------------------------------------------
@@ -583,32 +592,37 @@ def run(
                         click.echo()
             sys.exit(0)
 
-        # 4e. TTS synthesis
-        tts_task = progress.add_task(
-            f"[cyan]TTS synthesis[/cyan] ({len(chunks)} chunk(s))…",
-            total=len(chunks),
-        )
-        pcm_chunks = generate_audio_chunks(
-            chunks,
-            gemini_cfg,
-            token_tracker=tracker,
-            progress=progress,
-            task_id=tts_task,
-        )
-        progress.console.print(
-            f"  [dim]TTS done — {tracker.live_line()}[/dim]"
-        )
+        # 4e. TTS synthesis (skipped when --no-audio)
+        if not no_audio:
+            tts_task = progress.add_task(
+                f"[cyan]TTS synthesis[/cyan] ({len(chunks)} chunk(s))…",
+                total=len(chunks),
+            )
+            pcm_chunks = generate_audio_chunks(
+                chunks,
+                gemini_cfg,
+                token_tracker=tracker,
+                progress=progress,
+                task_id=tts_task,
+            )
+            progress.console.print(
+                f"  [dim]TTS done — {tracker.live_line()}[/dim]"
+            )
 
     # ------------------------------------------------------------------
-    # 5. Audio export
+    # 5. Audio export (skipped when --no-audio)
     # ------------------------------------------------------------------
     stem = _build_output_stem(topics, target_date)
-    filename = f"{stem}.{output_fmt}"
-    out_path = Path(output_dir) / filename
+    saved: Path | None = None
+    if not no_audio:
+        filename = f"{stem}.{output_fmt}"
+        out_path = Path(output_dir) / filename
 
-    logger.info("Exporting audio to %s…", out_path)
-    saved = export_audio(pcm_chunks, out_path, fmt=output_fmt)
-    click.echo(f"Podcast saved to: {saved}")
+        logger.info("Exporting audio to %s…", out_path)
+        saved = export_audio(pcm_chunks, out_path, fmt=output_fmt)
+        click.echo(f"Podcast saved to: {saved}")
+    else:
+        click.echo("Skipping TTS synthesis and audio export (--no-audio).")
 
     # ------------------------------------------------------------------
     # 6. Report folder
