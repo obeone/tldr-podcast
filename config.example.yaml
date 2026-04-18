@@ -7,7 +7,7 @@ web:
   # Topics to fetch by default when running interactively.
   # All supported slugs: ai infosec tech crypto founders dev it design
   #                      product devops marketing data fintech
-  default_topics: [ai, infosec, devops]
+  default_topics: [ ai, infosec, devops ]
   # User-Agent header sent to tldr.tech
   user_agent: "tldr-podcast/1.0"
   # HTTP timeout in seconds for newsletter page fetches
@@ -45,13 +45,13 @@ gemini:
     # A lightweight model is recommended since only titles/summaries are sent.
     model: gemini-2.0-flash-lite
   dialogue:
-    min_articles: 8      # minimum articles to cover (default: 8)
-    max_articles: 12     # maximum articles to cover (default: 12)
-    target_word_count: 1200  # minimum word count for the full dialogue
+    min_articles: 8 # minimum articles to cover (default: 8)
+    max_articles: 12 # maximum articles to cover (default: 12)
+    target_word_count: 1200 # minimum word count for the full dialogue
   tts_style:
-    pace: "slow and deliberate"   # natural-language pace for TTS preamble
+    pace: "slow and deliberate" # natural-language pace for TTS preamble
     scene: "Two friends co-hosting a casual French tech podcast in a cozy studio"
-    temperature: 1.2   # 0.0–2.0 — higher = more expressive
+    temperature: 1.2 # 0.0–2.0 — higher = more expressive
 
 scraping:
   # Maximum number of articles to scrape (additional ones keep newsletter summary)
@@ -161,5 +161,9 @@ pricing:
     output_per_1m: 10.00
 
   gemini-2.5-pro-preview-tts:
+    input_per_1m: 1.00
+    output_per_1m: 20.00
+
+  gemini-3.1-flash-tts-preview:
     input_per_1m: 1.00
     output_per_1m: 20.00
