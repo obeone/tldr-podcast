@@ -856,23 +856,33 @@ def config_show(resolve: bool) -> None:
 
 _COMPLETION_SHELLS = ("bash", "zsh", "fish")
 
-_INSTALL_HINTS = {
-    "bash": 'eval "$(tldr-podcast completions bash)"  # add to ~/.bashrc',
-    "zsh": 'eval "$(tldr-podcast completions zsh)"   # add to ~/.zshrc',
-    "fish": "tldr-podcast completions fish > ~/.config/fish/completions/tldr-podcast.fish",
-}
-
 
 @cli.command("completions")
 @click.argument("shell", type=click.Choice(_COMPLETION_SHELLS, case_sensitive=False))
 def completions(shell: str) -> None:
     """Print the shell completion script for SHELL (bash, zsh, fish).
 
+    Write the output to the appropriate file and source it from your shell
+    profile.  Do not pipe directly into eval.
+
     \b
-    Activation examples:
-      Bash:  eval "$(tldr-podcast completions bash)"   # add to ~/.bashrc
-      Zsh:   eval "$(tldr-podcast completions zsh)"    # add to ~/.zshrc
-      Fish:  tldr-podcast completions fish > ~/.config/fish/completions/tldr-podcast.fish
+    Bash (~/.bashrc):
+      mkdir -p ~/.local/share/bash-completion/completions
+      tldr-podcast completions bash > ~/.local/share/bash-completion/completions/tldr-podcast
+      # bash-completion picks it up automatically on next shell start
+
+    \b
+    Zsh (~/.zshrc):
+      mkdir -p ~/.zsh/completions
+      tldr-podcast completions zsh > ~/.zsh/completions/_tldr-podcast
+      # ensure ~/.zshrc contains:
+      #   fpath=(~/.zsh/completions $fpath)
+      #   autoload -Uz compinit && compinit
+
+    \b
+    Fish:
+      tldr-podcast completions fish > ~/.config/fish/completions/tldr-podcast.fish
+      # fish picks it up automatically on next shell start
     """
     from click.shell_completion import BashComplete, FishComplete, ZshComplete
 

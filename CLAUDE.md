@@ -38,6 +38,16 @@ uv run pytest tests/test_web_source.py::TestFetchNewsletters::test_happy_path_pa
 
 # Run with coverage
 uv run pytest tests/ --cov=src/tldr
+
+# Generate shell completions (bash/zsh/fish) — write to file, do not eval
+mkdir -p ~/.local/share/bash-completion/completions
+tldr-podcast completions bash > ~/.local/share/bash-completion/completions/tldr-podcast
+
+mkdir -p ~/.zsh/completions
+tldr-podcast completions zsh > ~/.zsh/completions/_tldr-podcast
+# add to ~/.zshrc: fpath=(~/.zsh/completions $fpath); autoload -Uz compinit && compinit
+
+tldr-podcast completions fish > ~/.config/fish/completions/tldr-podcast.fish
 ```
 
 ## Architecture
@@ -60,7 +70,7 @@ web_source (topics, date) → interest_ranking → web_scraper → llm_dialogue 
 - `report_generator.py` — Writes `overview.md`, `articles.md`, `script.md`, `summary.md` in a folder named after the podcast stem.
 - `link_extractor.py`, `token_tracker.py`, `retry.py` — Supporting helpers.
 
-**`cli.py`** — Click CLI entry point (group with `run` and `config` subcommands); orchestrates the full pipeline. Installed as the `tldr-podcast` command via `[project.scripts]`. All commands support `-h` for help. Short flags: `-c` config, `-t` topics, `-d` date, `-o` output-dir, `-n` dry-run, `-v` verbose, `-r`/`-R` report/no-report. Report generation is enabled by default.
+**`cli.py`** — Click CLI entry point (group with `run`, `config`, and `completions` subcommands); orchestrates the full pipeline. Installed as the `tldr-podcast` command via `[project.scripts]`. All commands support `-h` for help. Short flags: `-c` config, `-t` topics, `-d` date, `-o` output-dir, `-n` dry-run, `-v` verbose, `-r`/`-R` report/no-report. Report generation is enabled by default.
 
 Topic selection precedence: `--topics ai,devops` CLI arg > interactive `questionary.checkbox()` prompt (pre-checked from `web.default_topics`) > config `web.default_topics` (when `--no-interactive` is set).
 
@@ -88,14 +98,6 @@ Every feature, fix, or behavioural change **must** bump the version in `pyprojec
 - **patch** (`1.0.0` → `1.0.1`): bug fixes, minor tweaks
 - **minor** (`1.0.0` → `1.1.0`): new features, prompt changes, new CLI options
 - **major** (`1.0.0` → `2.0.0`): breaking changes (config format, CLI interface, output format)
-
-## Versioning
-
-Every feature, fix, or behavioural change **must** bump the version in `pyproject.toml` before committing. Follow [SemVer](https://semver.org/):
-
-- **patch** (`0.2.0` → `0.2.1`): bug fixes, minor tweaks
-- **minor** (`0.2.0` → `0.3.0`): new features, prompt changes, new CLI options
-- **major** (`0.2.0` → `1.0.0`): breaking changes (config format, CLI interface, output format)
 
 ## Dependencies
 
