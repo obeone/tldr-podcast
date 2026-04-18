@@ -637,7 +637,7 @@ def run(
             timestamp=stem,
             audio_path=saved,
             token_summary=tracker.summary(),
-            email_count=len(topics),
+            topics=topics,
             target_date=target_date,
         )
         click.echo(f"Report folder saved to: {report_dir}")
