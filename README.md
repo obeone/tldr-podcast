@@ -119,13 +119,14 @@ config keys ending in `_env` hold the **name** of the environment variable to re
 | `tldr-podcast run -t ai --no-interactive` | Non-interactive, use config defaults if no `-t` |
 | `tldr-podcast run -d 2026-04-06` | Target a specific date |
 | `tldr-podcast run -t ai -n` | Dry-run: print dialogue, skip TTS |
+| `tldr-podcast run -t ai -A` | Generate script + report, skip TTS and audio |
 | `tldr-podcast run -R` | Disable report generation |
 | `tldr-podcast run -o ./podcasts` | Custom output directory |
 | `tldr-podcast config init` | Interactive configuration wizard |
 | `tldr-podcast config show` | Display current config |
 | `tldr-podcast completions SHELL` | Print completion script (bash/zsh/fish) |
 
-**Short flags:** `-c` config · `-t` topics · `-d` date · `-o` output-dir · `-n` dry-run · `-v` verbose · `-r`/`-R` report/no-report · `-h` help
+**Short flags:** `-c` config · `-t` topics · `-d` date · `-o` output-dir · `-n` dry-run · `-A` no-audio · `-v` verbose · `-r`/`-R` report/no-report · `-h` help
 
 ### Output naming
 
