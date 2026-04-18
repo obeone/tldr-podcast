@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from unittest.mock import MagicMock, patch
 
 
-from tldr.llm_summarizer import DialogueChunk, generate_dialogue
+from tldr.llm_summarizer import DialogueChunk, _audio_tags_enabled, generate_dialogue
 
 
 # ---------------------------------------------------------------------------
@@ -251,3 +251,100 @@ class TestBuildPromptConfig:
             chunks = generate_dialogue(SAMPLE_ARTICLES, GEMINI_CFG, "Alex", "Jordan")
 
         assert len(chunks) > 0
+
+
+def _captured_prompt(mock_genai) -> str:
+    """Return the prompt string that was sent to the mocked Gemini client."""
+    call = mock_genai.Client.return_value.models.generate_content.call_args
+    return call.kwargs.get("contents") or call.args[1]
+
+
+class TestAudioTagsEnabled:
+    """Unit tests for the _audio_tags_enabled helper."""
+
+    def test_auto_detects_gemini_3_tts_model(self):
+        cfg = {"tts_model": "gemini-3.1-flash-preview-tts"}
+        assert _audio_tags_enabled(cfg) is True
+
+    def test_auto_rejects_gemini_2_5_tts_model(self):
+        cfg = {"tts_model": "gemini-2.5-flash-preview-tts"}
+        assert _audio_tags_enabled(cfg) is False
+
+    def test_explicit_on_overrides_unsupported_model(self):
+        cfg = {
+            "tts_model": "gemini-2.5-flash-preview-tts",
+            "tts_style": {"audio_tags": "on"},
+        }
+        assert _audio_tags_enabled(cfg) is True
+
+    def test_explicit_off_overrides_supported_model(self):
+        cfg = {
+            "tts_model": "gemini-3.1-flash-preview-tts",
+            "tts_style": {"audio_tags": "off"},
+        }
+        assert _audio_tags_enabled(cfg) is False
+
+    def test_boolean_values_accepted(self):
+        assert _audio_tags_enabled({"tts_style": {"audio_tags": True}}) is True
+        assert _audio_tags_enabled({"tts_style": {"audio_tags": False}}) is False
+
+    def test_missing_tts_model_defaults_off(self):
+        assert _audio_tags_enabled({}) is False
+
+
+class TestAudioTagsPromptInjection:
+    """Tests that generate_dialogue injects the right delivery-cue guidance."""
+
+    def test_gemini_3_prompt_contains_bracketed_tag_guidance(self):
+        cfg = {**GEMINI_CFG, "tts_model": "gemini-3.1-flash-preview-tts"}
+        mock_genai = _mock_genai_response(SHORT_DIALOGUE)
+
+        with patch("tldr.llm_summarizer.genai", mock_genai):
+            generate_dialogue(SAMPLE_ARTICLES, cfg, "Alex", "Jordan")
+
+        prompt = _captured_prompt(mock_genai)
+        assert "[enthusiasm]" in prompt
+        assert "[short pause]" in prompt
+        assert "square brackets" in prompt
+        # Should NOT fall back to French parenthetical cues as the primary guidance
+        assert "(avec enthousiasme)" not in prompt
+
+    def test_gemini_2_5_prompt_keeps_parenthetical_cues(self):
+        cfg = {**GEMINI_CFG, "tts_model": "gemini-2.5-flash-preview-tts"}
+        mock_genai = _mock_genai_response(SHORT_DIALOGUE)
+
+        with patch("tldr.llm_summarizer.genai", mock_genai):
+            generate_dialogue(SAMPLE_ARTICLES, cfg, "Alex", "Jordan")
+
+        prompt = _captured_prompt(mock_genai)
+        assert "(avec enthousiasme)" in prompt
+        assert "[enthusiasm]" not in prompt
+
+    def test_explicit_off_disables_tags_on_gemini_3(self):
+        cfg = {
+            **GEMINI_CFG,
+            "tts_model": "gemini-3.1-flash-preview-tts",
+            "tts_style": {"audio_tags": "off"},
+        }
+        mock_genai = _mock_genai_response(SHORT_DIALOGUE)
+
+        with patch("tldr.llm_summarizer.genai", mock_genai):
+            generate_dialogue(SAMPLE_ARTICLES, cfg, "Alex", "Jordan")
+
+        prompt = _captured_prompt(mock_genai)
+        assert "[enthusiasm]" not in prompt
+        assert "(avec enthousiasme)" in prompt
+
+    def test_explicit_on_enables_tags_on_older_model(self):
+        cfg = {
+            **GEMINI_CFG,
+            "tts_model": "gemini-2.5-flash-preview-tts",
+            "tts_style": {"audio_tags": "on"},
+        }
+        mock_genai = _mock_genai_response(SHORT_DIALOGUE)
+
+        with patch("tldr.llm_summarizer.genai", mock_genai):
+            generate_dialogue(SAMPLE_ARTICLES, cfg, "Alex", "Jordan")
+
+        prompt = _captured_prompt(mock_genai)
+        assert "[enthusiasm]" in prompt

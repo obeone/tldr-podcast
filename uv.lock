@@ -1368,7 +1368,7 @@ wheels = [
 
 [[package]]
 name = "tldr-podcast"
-version = "1.3.0"
+version = "1.4.1"
 source = { editable = "." }
 dependencies = [
     { name = "audioop-lts" },

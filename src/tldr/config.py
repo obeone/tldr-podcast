@@ -14,6 +14,8 @@ from typing import Any
 
 import yaml
 
+from tldr.config_migrations import upgrade_config_if_needed
+
 
 class ConfigError(Exception):
     """Raised when configuration loading or env-var resolution fails."""
@@ -106,5 +108,10 @@ def load_config(path: str | Path) -> dict[str, Any]:
         raise ConfigError(
             f"Configuration file must contain a YAML mapping, got {type(raw).__name__}."
         )
+
+    # IMPORTANT: migrations MUST run on the raw dict *before* env-var
+    # resolution, otherwise the upgrade backup and any rewritten file would
+    # contain secrets. Do not reorder these two calls.
+    raw = upgrade_config_if_needed(raw, config_path)
 
     return _resolve_env_vars(raw)

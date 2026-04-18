@@ -72,6 +72,45 @@ Articles:
 {articles}
 """
 
+_AUDIO_TAGS_GUIDANCE = """\
+- When a speaker turn has a distinct emotional or pacing colour, start it with \
+an English audio tag in square brackets (e.g., "[enthusiasm] Incroyable !"). \
+Skip the opening tag when the line is plainly neutral — don't force a tag \
+just to have one.
+- You may also sprinkle additional audio tags mid-turn when they add real \
+expressive value — sparingly, never more than one every couple of sentences.
+  * Non-verbal vocalizations: [laughs], [gasp], [whispers]
+  * Pacing: [short pause], [long pause], [slow], [fast]
+  * Emotion: [enthusiasm], [curiosity], [amusement], [seriousness], \
+[cautious], [relief], [awe], [confusion]
+- Audio tags MUST be in English and enclosed in square brackets, even when the \
+surrounding dialogue is in another language.
+- Never place two tags back to back — always separate them with spoken text or \
+punctuation.
+- Do NOT also add a French parenthetical cue describing the same effect when a \
+bracketed audio tag is used."""
+
+_PAREN_CUES_GUIDANCE = """\
+- EVERY speaker turn MUST start with an inline emotional cue in parentheses \
+(e.g., "(avec enthousiasme) Incroyable !"). This sets the delivery tone for \
+the turn.
+- You may also add additional parenthetical cues mid-turn to guide delivery \
+(e.g., "(sceptique)", "(posément)", "(en pesant ses mots)", \
+"(après une courte pause)"). Vary them naturally according to the content and \
+pace of the discussion."""
+
+_EXAMPLE_AUDIO_TAGS = """\
+{speaker1}: [enthusiasm] Incroyable, {speaker2} ! Google vient d'annoncer quelque chose qui change tout !
+{speaker2}: [seriousness] Mouais, on a déjà entendu ça. [curiosity] Qu'est-ce qui est vraiment nouveau cette fois ?
+{speaker1}: [amusement] Eh bien, ils ont réussi à réduire la latence de moitié !
+{speaker2}: [awe] D'accord, ça c'est concret. [short pause] Mais quelles sont les implications ?"""
+
+_EXAMPLE_PAREN_CUES = """\
+{speaker1}: (avec enthousiasme) Incroyable, {speaker2} ! Google vient d'annoncer quelque chose qui change tout !
+{speaker2}: (sceptique) Mouais... on a déjà entendu ça. Qu'est-ce qui est vraiment nouveau cette fois ?
+{speaker1}: (en accélérant) Eh bien, ils ont réussi à réduire la latence de moitié !
+{speaker2}: (impressionné malgré lui) D'accord, ça c'est concret. Mais quelles sont les implications ?"""
+
 _SYSTEM_PROMPT_TEMPLATE = """\
 You are a podcast script writer. Your job is to create an engaging, \
 conversational podcast dialogue between two hosts: {speaker1} and {speaker2}.
@@ -90,10 +129,7 @@ Aim for 3 to 5 exchanges per article.
 - The total dialogue must be at least {target_word_count} words.
 - Keep the tone informative but lively — like two curious friends catching up on tech news.
 - Reflect each host's personality in their speaking style and reactions.
-- Add inline emotional cues in parentheses within the dialogue text to guide \
-delivery (e.g., "(avec enthousiasme)", "(sceptique)", "(posément)", \
-"(en pesant ses mots)", "(après une courte pause)"). Vary them naturally \
-according to the content and pace of the discussion.
+{delivery_cues_guidance}
 - Use shorter sentences for excitement, longer ones for analysis.
 - End the dialogue with a conclusion segment where the hosts briefly recap ALL \
 the topics covered during the episode. Number each topic explicitly in the \
@@ -106,19 +142,55 @@ what was discussed.
 STRICT OUTPUT FORMAT:
 - Each line must follow exactly this pattern: SpeakerName: dialogue text
 - Alternate between {speaker1} and {speaker2}.
-- Emotional cues go INSIDE the dialogue text, never in the SpeakerName prefix.
+- Delivery cues go INSIDE the dialogue text, never in the SpeakerName prefix.
 - Do NOT add blank lines between turns.
 - Do NOT add any introduction or conclusion outside of the dialogue format.
 
 Example output format:
-{speaker1}: (avec enthousiasme) Incroyable, {speaker2} ! Google vient d'annoncer quelque chose qui change tout !
-{speaker2}: Mouais... (sceptique) on a déjà entendu ça. Qu'est-ce qui est vraiment nouveau cette fois ?
-{speaker1}: Eh bien, (en accélérant) ils ont réussi à réduire la latence de moitié !
-{speaker2}: (impressionné malgré lui) D'accord, ça c'est concret. Mais quelles sont les implications ?
+{example_dialogue}
 
 Articles:
 {articles}
 """
+
+
+def _audio_tags_enabled(gemini_cfg: dict) -> bool:
+    """
+    Decide whether inline English audio tags should be requested from the LLM.
+
+    Policy:
+
+    - ``gemini.tts_style.audio_tags`` set to ``"on"``/``True`` → always enabled.
+    - Set to ``"off"``/``False`` → always disabled.
+    - Set to ``"auto"``, missing, or any other value → enabled iff the
+      configured ``tts_model`` name starts with ``"gemini-3"`` (Gemini 3.x
+      Flash TTS introduced bracketed audio-tag support).
+
+    Parameters
+    ----------
+    gemini_cfg : dict
+        Resolved Gemini configuration section.
+
+    Returns
+    -------
+    bool
+        ``True`` when audio tags should be included in the dialogue prompt.
+    """
+    setting = gemini_cfg.get("tts_style", {}).get("audio_tags", "auto")
+    if isinstance(setting, bool):
+        return setting
+    normalised = str(setting).strip().lower()
+    if normalised in {"on", "true", "yes", "1", "enabled"}:
+        return True
+    if normalised in {"off", "false", "no", "0", "disabled"}:
+        return False
+    if normalised not in {"auto", ""}:
+        logger.warning(
+            "Unknown gemini.tts_style.audio_tags value %r — falling back to auto-detection.",
+            setting,
+        )
+    tts_model = str(gemini_cfg.get("tts_model", "")).lower()
+    return tts_model.startswith("gemini-3")
 
 
 def _build_prompt(
@@ -131,6 +203,7 @@ def _build_prompt(
     max_articles: int = 12,
     target_word_count: int = 1200,
     language: str = "French",
+    audio_tags: bool = False,
 ) -> str:
     """
     Build the full LLM prompt from the article list, speaker names, and personalities.
@@ -172,6 +245,14 @@ def _build_prompt(
 
     articles_text = "\n\n".join(article_blocks)
 
+    delivery_cues_guidance = (
+        _AUDIO_TAGS_GUIDANCE if audio_tags else _PAREN_CUES_GUIDANCE
+    )
+    example_template = _EXAMPLE_AUDIO_TAGS if audio_tags else _EXAMPLE_PAREN_CUES
+    example_dialogue = example_template.format(
+        speaker1=speaker1_name, speaker2=speaker2_name
+    )
+
     return _SYSTEM_PROMPT_TEMPLATE.format(
         speaker1=speaker1_name,
         speaker2=speaker2_name,
@@ -181,6 +262,8 @@ def _build_prompt(
         max_articles=max_articles,
         target_word_count=target_word_count,
         language=language,
+        delivery_cues_guidance=delivery_cues_guidance,
+        example_dialogue=example_dialogue,
         articles=articles_text,
     )
 
@@ -655,6 +738,10 @@ def generate_dialogue(
     max_articles = dialogue_cfg.get("max_articles", 12)
     target_word_count = dialogue_cfg.get("target_word_count", 1200)
 
+    audio_tags = _audio_tags_enabled(gemini_cfg)
+    if audio_tags:
+        logger.info("Audio tags enabled for dialogue prompt (tts_model=%s).", gemini_cfg.get("tts_model"))
+
     prompt = _build_prompt(
         articles,
         speaker1_name,
@@ -665,6 +752,7 @@ def generate_dialogue(
         max_articles=max_articles,
         target_word_count=target_word_count,
         language=language,
+        audio_tags=audio_tags,
     )
 
     logger.info(
