@@ -22,6 +22,7 @@ from tldr.web_source import (
     _is_sponsor_section,
     _parse_html,
     _strip_read_time,
+    check_availability,
     fetch_newsletters,
     validate_topics,
 )
@@ -425,3 +426,60 @@ class TestRealFixture:
         for a in articles:
             assert a.title, "Empty title found"
             assert a.url.startswith("http"), f"Invalid URL: {a.url!r}"
+
+
+class TestCheckAvailability:
+    """check_availability() filters out redirected topic URLs in parallel."""
+
+    def _make_head_response(self, url: str, status_code: int) -> object:
+        from unittest.mock import MagicMock
+
+        request = MagicMock()
+        response = MagicMock()
+        response.status_code = status_code
+        response.is_redirect = 300 <= status_code < 400
+        response.request = request
+        return response
+
+    def test_only_available_topics_returned(self) -> None:
+        """A 200 is available; a 3xx (redirect) is not."""
+        from unittest.mock import patch
+
+        def _fake_head(self_, url, follow_redirects=False):
+            # Pretend 'ai' and 'devops' publish, the rest redirect.
+            if url.endswith("/ai/2026-04-17") or url.endswith("/devops/2026-04-17"):
+                return TestCheckAvailability()._make_head_response(url, 200)
+            return TestCheckAvailability()._make_head_response(url, 307)
+
+        with patch("httpx.Client.head", new=_fake_head):
+            result = check_availability(
+                ["ai", "infosec", "devops", "crypto"],
+                date(2026, 4, 17),
+            )
+        assert result == ["ai", "devops"]
+
+    def test_preserves_input_order(self) -> None:
+        """Returned topics keep the order of the input list."""
+        from unittest.mock import patch
+
+        def _fake_head(self_, url, follow_redirects=False):
+            return TestCheckAvailability()._make_head_response(url, 200)
+
+        with patch("httpx.Client.head", new=_fake_head):
+            result = check_availability(
+                ["devops", "ai", "infosec"],
+                date(2026, 4, 17),
+            )
+        assert result == ["devops", "ai", "infosec"]
+
+    def test_http_error_treated_as_unavailable(self) -> None:
+        """Network failures during probing are silently marked unavailable."""
+        import httpx
+        from unittest.mock import patch
+
+        def _fake_head(self_, url, follow_redirects=False):
+            raise httpx.ConnectError("boom")
+
+        with patch("httpx.Client.head", new=_fake_head):
+            result = check_availability(["ai", "devops"], date(2026, 4, 17))
+        assert result == []

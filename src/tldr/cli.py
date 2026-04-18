@@ -54,7 +54,12 @@ from tldr.report_generator import generate_report
 from tldr.token_tracker import TokenTracker
 from tldr.tts_generator import generate_audio_chunks
 from tldr.web_scraper import scrape_articles
-from tldr.web_source import SUPPORTED_TOPICS, fetch_newsletters, validate_topics
+from tldr.web_source import (
+    SUPPORTED_TOPICS,
+    check_availability,
+    fetch_newsletters,
+    validate_topics,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -193,17 +198,31 @@ def _resolve_config_path(config_path: str | None) -> str:
     sys.exit(1)
 
 
-def _select_topics_interactive(default_topics: list[str]) -> list[str]:
+def _select_topics_interactive(
+    default_topics: list[str],
+    target_date: date,
+    *,
+    web_timeout: int,
+    web_user_agent: str,
+) -> list[str]:
     """
-    Display an interactive checkbox so the user can pick which topics to fetch.
+    Display an interactive checkbox restricted to topics published on *target_date*.
 
-    Falls back to returning *default_topics* when ``questionary`` is not
-    available or when stdin is not a TTY.
+    Availability is probed in parallel with HEAD requests before the prompt
+    so users only pick from editions that actually exist for the target
+    date.  Falls back to returning *default_topics* when ``questionary`` is
+    not available or when stdin is not a TTY.
 
     Parameters
     ----------
     default_topics : list[str]
-        Topic slugs that are pre-checked in the selector.
+        Topic slugs pre-checked in the selector (intersected with availability).
+    target_date : date
+        Date of the newsletter edition to check.
+    web_timeout : int
+        HTTP request timeout (seconds) for the availability probe.
+    web_user_agent : str
+        ``User-Agent`` header sent with the probe.
 
     Returns
     -------
@@ -220,12 +239,29 @@ def _select_topics_interactive(default_topics: list[str]) -> list[str]:
         logger.warning("questionary not available; using default topics.")
         return default_topics or list(SUPPORTED_TOPICS[:3])
 
+    click.echo(f"Checking TLDR editions published on {target_date.isoformat()}…")
+    available = check_availability(
+        list(SUPPORTED_TOPICS),
+        target_date,
+        timeout_seconds=web_timeout,
+        user_agent=web_user_agent,
+    )
+
+    if not available:
+        click.echo(
+            f"[ERROR] No TLDR edition published on {target_date.isoformat()}. "
+            "Try another date with --date YYYY-MM-DD.",
+            err=True,
+        )
+        sys.exit(1)
+
     choices = [
         questionary.Choice(title=t, checked=(t in default_topics))
-        for t in SUPPORTED_TOPICS
+        for t in available
     ]
     selected: list[str] | None = questionary.checkbox(
-        "Select TLDR topics to fetch (space to toggle, enter to confirm):",
+        f"Select topics published on {target_date.isoformat()} "
+        f"(space to toggle, enter to confirm):",
         choices=choices,
     ).ask()
 
@@ -420,7 +456,12 @@ def run(
             click.echo(f"[ERROR] {exc}", err=True)
             sys.exit(1)
     else:
-        topics = _select_topics_interactive(default_topics)
+        topics = _select_topics_interactive(
+            default_topics,
+            target_date,
+            web_timeout=web_timeout,
+            web_user_agent=web_user_agent,
+        )
 
     logger.info("Topics: %s  |  Date: %s", ", ".join(topics), target_date.isoformat())
 

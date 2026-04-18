@@ -145,6 +145,59 @@ def _strip_read_time(title: str) -> str:
     ).strip()
 
 
+def check_availability(
+    topics: list[str],
+    target_date: date,
+    *,
+    timeout_seconds: int = _DEFAULT_TIMEOUT_SECONDS,
+    user_agent: str = _DEFAULT_USER_AGENT,
+) -> list[str]:
+    """
+    Return the subset of *topics* that have a published newsletter on *target_date*.
+
+    Each URL is probed with a ``HEAD`` request (``follow_redirects=False``)
+    in parallel threads.  Any 3xx response means ``tldr.tech`` is about to
+    redirect to the bare topic page → no edition for this date.  All other
+    successful responses (``2xx``) are treated as available.
+
+    Parameters
+    ----------
+    topics : list[str]
+        Topic slugs to check (must already be valid).
+    target_date : date
+        Date of the newsletter edition to check.
+    timeout_seconds : int, optional
+        HTTP request timeout, by default 15.
+    user_agent : str, optional
+        ``User-Agent`` header to send, by default ``"tldr-podcast/1.0"``.
+
+    Returns
+    -------
+    list[str]
+        Topics in the same order as *topics* whose edition exists.
+    """
+    import concurrent.futures
+
+    headers = {"User-Agent": user_agent}
+
+    def _probe(topic: str) -> tuple[str, bool]:
+        url = _build_url(topic, target_date)
+        try:
+            with httpx.Client(timeout=timeout_seconds, headers=headers) as client:
+                response = client.head(url, follow_redirects=False)
+        except httpx.HTTPError as exc:
+            logger.debug("Availability probe failed for %s: %s", url, exc)
+            return topic, False
+        if response.is_redirect or response.status_code >= 400:
+            return topic, False
+        return topic, True
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(topics) or 1) as pool:
+        results = dict(pool.map(_probe, topics))
+
+    return [t for t in topics if results.get(t)]
+
+
 def _fetch_page(
     url: str,
     *,
