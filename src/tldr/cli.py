@@ -3,9 +3,10 @@ TLDR Newsletter → Podcast CLI.
 
 Commands
 --------
-    tldr-podcast run [OPTIONS]      Run the full pipeline.
-    tldr-podcast config init        Interactive configuration wizard.
-    tldr-podcast config show        Display the current configuration file.
+    tldr-podcast run [OPTIONS]               Run the full pipeline.
+    tldr-podcast config init                 Interactive configuration wizard.
+    tldr-podcast config show                 Display the current configuration file.
+    tldr-podcast completions SHELL           Print shell completion script (bash/zsh/fish).
 
 Run options
 -----------
@@ -847,6 +848,37 @@ def config_show(resolve: bool) -> None:
         text = _DEFAULT_CONFIG.read_text(encoding="utf-8")
         console.print(Syntax(text, "yaml", theme="monokai"))
         click.echo(f"\n{_DEFAULT_CONFIG}")
+
+
+# ---------------------------------------------------------------------------
+# `completions` command
+# ---------------------------------------------------------------------------
+
+_COMPLETION_SHELLS = ("bash", "zsh", "fish")
+
+_INSTALL_HINTS = {
+    "bash": 'eval "$(tldr-podcast completions bash)"  # add to ~/.bashrc',
+    "zsh": 'eval "$(tldr-podcast completions zsh)"   # add to ~/.zshrc',
+    "fish": "tldr-podcast completions fish > ~/.config/fish/completions/tldr-podcast.fish",
+}
+
+
+@cli.command("completions")
+@click.argument("shell", type=click.Choice(_COMPLETION_SHELLS, case_sensitive=False))
+def completions(shell: str) -> None:
+    """Print the shell completion script for SHELL (bash, zsh, fish).
+
+    \b
+    Activation examples:
+      Bash:  eval "$(tldr-podcast completions bash)"   # add to ~/.bashrc
+      Zsh:   eval "$(tldr-podcast completions zsh)"    # add to ~/.zshrc
+      Fish:  tldr-podcast completions fish > ~/.config/fish/completions/tldr-podcast.fish
+    """
+    from click.shell_completion import BashComplete, FishComplete, ZshComplete
+
+    cls = {"bash": BashComplete, "zsh": ZshComplete, "fish": FishComplete}[shell.lower()]
+    comp = cls(cli, {}, "tldr-podcast", "_TLDR_PODCAST_COMPLETE")
+    click.echo(comp.source())
 
 
 if __name__ == "__main__":
