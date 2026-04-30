@@ -100,16 +100,20 @@ the turn.
 pace of the discussion."""
 
 _EXAMPLE_AUDIO_TAGS = """\
-{speaker1}: [enthusiasm] Incroyable, {speaker2} ! Google vient d'annoncer quelque chose qui change tout !
-{speaker2}: [seriousness] Mouais, on a déjà entendu ça. [curiosity] Qu'est-ce qui est vraiment nouveau cette fois ?
-{speaker1}: [amusement] Eh bien, ils ont réussi à réduire la latence de moitié !
-{speaker2}: [awe] D'accord, ça c'est concret. [short pause] Mais quelles sont les implications ?"""
+{speaker1}: [neutral] {speaker2}, on a une annonce de Google cette semaine sur leur API.
+{speaker2}: [curiosity] Ah ? [short pause] Qu'est-ce qu'ils publient ?
+{speaker1}: [animated] Une réduction de latence de cinquante pour cent sur les requêtes longues — c'est pas rien.
+{speaker2}: [thoughtful] D'accord. [short pause] Ils expliquent comment ils y arrivent, ou c'est un chiffre marketing ?
+{speaker1}: [matter-of-fact] Ils parlent d'un nouveau routage côté inférence. Le détail technique reste vague.
+{speaker2}: [skeptical] Mouais. [short pause] On verra à l'usage."""
 
 _EXAMPLE_PAREN_CUES = """\
-{speaker1}: (avec enthousiasme) Incroyable, {speaker2} ! Google vient d'annoncer quelque chose qui change tout !
-{speaker2}: (sceptique) Mouais... on a déjà entendu ça. Qu'est-ce qui est vraiment nouveau cette fois ?
-{speaker1}: (en accélérant) Eh bien, ils ont réussi à réduire la latence de moitié !
-{speaker2}: (impressionné malgré lui) D'accord, ça c'est concret. Mais quelles sont les implications ?"""
+{speaker1}: (de manière neutre) {speaker2}, on a une annonce de Google cette semaine sur leur API.
+{speaker2}: (curieux) Ah ? Qu'est-ce qu'ils publient ?
+{speaker1}: (avec entrain) Une réduction de latence de cinquante pour cent sur les requêtes longues — c'est pas rien.
+{speaker2}: (en réfléchissant) D'accord. Ils expliquent comment ils y arrivent, ou c'est un chiffre marketing ?
+{speaker1}: (de façon factuelle) Ils parlent d'un nouveau routage côté inférence. Le détail technique reste vague.
+{speaker2}: (sceptique) Mouais. On verra à l'usage."""
 
 _SYSTEM_PROMPT_TEMPLATE = """\
 You are a podcast script writer. Your job is to create an engaging, \
