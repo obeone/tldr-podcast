@@ -3,6 +3,7 @@ TLDR Newsletter → Podcast CLI.
 
 Commands
 --------
+    tldr-podcast --version                   Print the installed version and exit.
     tldr-podcast run [OPTIONS]               Run the full pipeline.
     tldr-podcast config init                 Interactive configuration wizard.
     tldr-podcast config show                 Display the current configuration file.
@@ -306,6 +307,12 @@ CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
 
 
 @click.group(context_settings=CONTEXT_SETTINGS)
+@click.version_option(
+    None,
+    "--version",
+    package_name="tldr-podcast",
+    prog_name="tldr-podcast",
+)
 def cli() -> None:
     """TLDR Newsletter → Podcast: convert newsletters into two-voice MP3 podcasts."""
 

@@ -71,7 +71,7 @@ web_source (topics, date) → interest_ranking → web_scraper → llm_dialogue 
 - `report_generator.py` — Writes `overview.md`, `articles.md`, `script.md`, `summary.md` in a folder named after the podcast stem.
 - `link_extractor.py`, `token_tracker.py`, `retry.py` — Supporting helpers.
 
-**`cli.py`** — Click CLI entry point (group with `run`, `config`, and `completions` subcommands); orchestrates the full pipeline. Installed as the `tldr-podcast` command via `[project.scripts]`. All commands support `-h` for help. Short flags: `-c` config, `-t` topics, `-d` date, `-o` output-dir, `-n` dry-run, `-A` no-audio, `-v` verbose, `-r`/`-R` report/no-report. Report generation is enabled by default.
+**`cli.py`** — Click CLI entry point (group with `run`, `config`, and `completions` subcommands); orchestrates the full pipeline. Installed as the `tldr-podcast` command via `[project.scripts]`. The top-level group exposes `--version` (reads version from package metadata, prints, and exits). All commands support `-h` for help. Short flags on `run`: `-c` config, `-t` topics, `-d` date, `-o` output-dir, `-n` dry-run, `-A` no-audio, `-v` verbose, `-r`/`-R` report/no-report. Report generation is enabled by default.
 
 Topic selection precedence: `--topics ai,devops` CLI arg > interactive `questionary.checkbox()` prompt (pre-checked from `web.default_topics`) > config `web.default_topics` (when `--no-interactive` is set).
 

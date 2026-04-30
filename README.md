@@ -127,6 +127,7 @@ config keys ending in `_env` hold the **name** of the environment variable to re
 | `tldr-podcast config init` | Interactive configuration wizard |
 | `tldr-podcast config show` | Display current config |
 | `tldr-podcast completions SHELL` | Print completion script (bash/zsh/fish) |
+| `tldr-podcast --version` | Print the installed version and exit |
 
 **Short flags:** `-c` config · `-t` topics · `-d` date · `-o` output-dir · `-n` dry-run · `-A` no-audio · `-v` verbose · `-r`/`-R` report/no-report · `-h` help
 
