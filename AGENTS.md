@@ -58,6 +58,12 @@ Use a dedicated worktree for large, risky, or multi-file changes. Small,
 targeted edits such as documentation updates, configuration tweaks, or single
 file fixes may be done directly on a feature branch.
 
+When editing directly in the shared checkout, create an `.agent.lock` file
+before making changes and remove it when finished. If `.agent.lock` already
+exists, inspect it and coordinate before editing. The lockfile should include
+the agent name or session identifier, the branch name, the intended change, and
+the start time.
+
 ## Configuration & Security Tips
 
 Do not commit secrets. Runtime credentials such as `GEMINI_API_KEY` should come
