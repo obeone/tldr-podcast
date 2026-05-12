@@ -56,6 +56,7 @@ from tldr.models import Article
 from tldr.report_generator import generate_report
 from tldr.token_tracker import TokenTracker
 from tldr.tts_generator import generate_audio_chunks
+from tldr.user_agent import BROWSER_USER_AGENT
 from tldr.web_scraper import scrape_articles
 from tldr.web_source import (
     SUPPORTED_TOPICS,
@@ -447,7 +448,7 @@ def run(
     speaker2_name: str = gemini_cfg.get("speaker2", {}).get("name", "Jordan")
 
     web_timeout: int = web_cfg.get("timeout_seconds", 15)
-    web_user_agent: str = web_cfg.get("user_agent", "tldr-podcast/1.0")
+    web_user_agent: str = web_cfg.get("user_agent", BROWSER_USER_AGENT)
     default_topics: list[str] = web_cfg.get("default_topics", ["ai", "infosec", "devops"])
 
     service_tier: str | None = gemini_cfg.get("service_tier") or None
@@ -543,6 +544,7 @@ def run(
             all_articles,
             timeout=scrape_timeout,
             max_articles=max_articles,
+            user_agent=web_user_agent,
             progress=progress,
             task_id=scrape_task,
         )
@@ -714,7 +716,7 @@ def config_init(output_path: str) -> None:
     )
     web_user_agent = _prompt(
         "User-Agent header",
-        _get("web", "user_agent", "tldr-podcast/1.0"),
+        _get("web", "user_agent", BROWSER_USER_AGENT),
     )
     web_timeout = _prompt(
         "HTTP timeout (seconds)",

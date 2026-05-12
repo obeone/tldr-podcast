@@ -12,6 +12,11 @@ from unittest.mock import patch
 
 from tldr.web_scraper import scrape_article, scrape_articles
 
+_BROWSER_USER_AGENT = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
+)
+
 
 # ---------------------------------------------------------------------------
 # Minimal stub that satisfies the ArticleLike protocol
@@ -35,7 +40,7 @@ class FakeArticle:
 class TestScrapeArticle:
     """Unit tests for scrape_article()."""
 
-    def test_returns_text_on_success(self):
+    def test_returns_text_on_success(self) -> None:
         """scrape_article returns extracted text when trafilatura succeeds."""
         with (
             patch("tldr.web_scraper.trafilatura.fetch_url", return_value="<html>") as mock_fetch,
@@ -44,17 +49,35 @@ class TestScrapeArticle:
             result = scrape_article("https://example.com/article")
 
         assert result == "Article body text"
-        mock_fetch.assert_called_once_with("https://example.com/article", no_ssl=True)
+        mock_fetch.assert_called_once_with(
+            "https://example.com/article",
+            no_ssl=True,
+            headers={"User-Agent": _BROWSER_USER_AGENT},
+        )
         mock_extract.assert_called_once_with("<html>")
 
-    def test_returns_none_when_fetch_url_returns_none(self):
+    def test_fetch_url_uses_browser_user_agent_by_default(self) -> None:
+        """scrape_article sends a browser-like User-Agent when downloading."""
+        with (
+            patch("tldr.web_scraper.trafilatura.fetch_url", return_value="<html>") as mock_fetch,
+            patch("tldr.web_scraper.trafilatura.extract", return_value="Article body text"),
+        ):
+            scrape_article("https://example.com/article")
+
+        mock_fetch.assert_called_once_with(
+            "https://example.com/article",
+            no_ssl=True,
+            headers={"User-Agent": _BROWSER_USER_AGENT},
+        )
+
+    def test_returns_none_when_fetch_url_returns_none(self) -> None:
         """scrape_article returns None when trafilatura.fetch_url returns None."""
         with patch("tldr.web_scraper.trafilatura.fetch_url", return_value=None):
             result = scrape_article("https://example.com/article")
 
         assert result is None
 
-    def test_returns_none_when_fetch_url_raises(self):
+    def test_returns_none_when_fetch_url_raises(self) -> None:
         """scrape_article returns None (does not raise) when fetch_url throws."""
         with patch(
             "tldr.web_scraper.trafilatura.fetch_url",
@@ -64,7 +87,7 @@ class TestScrapeArticle:
 
         assert result is None
 
-    def test_returns_none_when_extract_returns_none(self):
+    def test_returns_none_when_extract_returns_none(self) -> None:
         """scrape_article returns None when trafilatura.extract returns None."""
         with (
             patch("tldr.web_scraper.trafilatura.fetch_url", return_value="<html>"),
@@ -83,7 +106,7 @@ class TestScrapeArticle:
 class TestScrapeArticles:
     """Unit tests for scrape_articles()."""
 
-    def test_sets_full_text_on_success(self):
+    def test_sets_full_text_on_success(self) -> None:
         """scrape_articles populates full_text from scraped content."""
         articles = [FakeArticle(url="https://a.com", summary="Summary A")]
 
@@ -95,7 +118,7 @@ class TestScrapeArticles:
 
         assert articles[0].full_text == "Full text A"
 
-    def test_falls_back_to_summary_on_failure(self):
+    def test_falls_back_to_summary_on_failure(self) -> None:
         """scrape_articles falls back to article.summary when scraping fails."""
         articles = [FakeArticle(url="https://a.com", summary="Fallback summary")]
 
@@ -104,7 +127,17 @@ class TestScrapeArticles:
 
         assert articles[0].full_text == "Fallback summary"
 
-    def test_respects_max_articles_limit(self):
+    def test_passes_custom_user_agent_to_article_scraper(self) -> None:
+        """scrape_articles forwards the configured UA to each article fetch."""
+        articles = [FakeArticle(url="https://a.com", summary="Summary A")]
+
+        with patch("tldr.web_scraper.scrape_article", return_value="Full text") as mock_scrape:
+            scrape_articles(articles, user_agent="custom-client/7.0")
+
+        mock_scrape.assert_called_once_with("https://a.com", 10, "custom-client/7.0")
+        assert articles[0].full_text == "Full text"
+
+    def test_respects_max_articles_limit(self) -> None:
         """scrape_articles processes at most max_articles items."""
         articles = [
             FakeArticle(url=f"https://example.com/{i}", summary=f"Summary {i}")

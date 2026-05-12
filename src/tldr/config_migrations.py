@@ -26,11 +26,14 @@ from typing import Any, Callable
 
 import yaml
 
+from tldr.user_agent import BROWSER_USER_AGENT
+
 logger = logging.getLogger(__name__)
 
 # Current schema version.  Bump this whenever you add a migration below.
-CURRENT_CONFIG_VERSION: int = 2
+CURRENT_CONFIG_VERSION: int = 3
 
+_OLD_DEFAULT_USER_AGENT = "tldr-podcast/1.0"
 
 def _migrate_1_to_2(raw: dict[str, Any]) -> dict[str, Any]:
     """
@@ -57,8 +60,33 @@ def _migrate_1_to_2(raw: dict[str, Any]) -> dict[str, Any]:
     return raw
 
 
+def _migrate_2_to_3(raw: dict[str, Any]) -> dict[str, Any]:
+    """
+    Replace the old default bot-like User-Agent with a browser-like UA.
+
+    The migration updates only configurations that either omit
+    ``web.user_agent`` or still use the previous default value. Custom
+    user-provided values are preserved.
+
+    Parameters
+    ----------
+    raw : dict
+        The raw config dict at schema version 2.
+
+    Returns
+    -------
+    dict
+        Config dict upgraded to schema version 3.
+    """
+    web = raw.setdefault("web", {})
+    if web.get("user_agent", _OLD_DEFAULT_USER_AGENT) == _OLD_DEFAULT_USER_AGENT:
+        web["user_agent"] = BROWSER_USER_AGENT
+    return raw
+
+
 MIGRATIONS: list[tuple[int, Callable[[dict[str, Any]], dict[str, Any]]]] = [
     (1, _migrate_1_to_2),
+    (2, _migrate_2_to_3),
 ]
 
 # Enforce a contiguous migration chain from v1 to CURRENT_CONFIG_VERSION.

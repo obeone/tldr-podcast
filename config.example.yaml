@@ -8,8 +8,8 @@ web:
   # All supported slugs: ai infosec tech crypto founders dev it design
   #                      product devops marketing data fintech
   default_topics: [ ai, infosec, devops ]
-  # User-Agent header sent to tldr.tech
-  user_agent: "tldr-podcast/1.0"
+  # User-Agent header sent when fetching newsletters and articles
+  user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
   # HTTP timeout in seconds for newsletter page fetches
   timeout_seconds: 15
 

@@ -16,6 +16,7 @@ from unittest.mock import patch
 import pytest
 
 from tldr.web_source import (
+    _DEFAULT_USER_AGENT,
     SUPPORTED_TOPICS,
     _build_url,
     _is_sponsor_article,
@@ -25,6 +26,11 @@ from tldr.web_source import (
     check_availability,
     fetch_newsletters,
     validate_topics,
+)
+
+_BROWSER_USER_AGENT = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
 )
 
 
@@ -430,6 +436,10 @@ class TestRealFixture:
 
 class TestCheckAvailability:
     """check_availability() filters out redirected topic URLs in parallel."""
+
+    def test_default_user_agent_matches_browser(self) -> None:
+        """The default web-source User-Agent is a browser-like Chrome UA."""
+        assert _DEFAULT_USER_AGENT == _BROWSER_USER_AGENT
 
     def _make_head_response(self, url: str, status_code: int) -> object:
         from unittest.mock import MagicMock

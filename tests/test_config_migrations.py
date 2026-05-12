@@ -11,6 +11,11 @@ from tldr.config_migrations import (
     upgrade_config_if_needed,
 )
 
+_BROWSER_USER_AGENT = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
+)
+
 
 def _write_yaml(path: Path, data: dict) -> None:
     path.write_text(
@@ -25,17 +30,58 @@ class TestUpgradeConfigIfNeeded:
     def test_v1_config_upgrades_to_current(self, tmp_path: Path) -> None:
         """A v1 config (no config_version key) is upgraded and written back."""
         cfg_path = tmp_path / "config.yaml"
-        raw = {"gemini": {"tts_model": "gemini-2.5-flash-preview-tts"}}
+        raw = {
+            "web": {"user_agent": "tldr-podcast/1.0"},
+            "gemini": {"tts_model": "gemini-2.5-flash-preview-tts"},
+        }
         _write_yaml(cfg_path, raw)
 
         upgraded = upgrade_config_if_needed(dict(raw), cfg_path)
 
         assert upgraded["config_version"] == CURRENT_CONFIG_VERSION
+        assert upgraded["web"]["user_agent"] == _BROWSER_USER_AGENT
         assert upgraded["gemini"]["tts_style"]["audio_tags"] == "auto"
 
         on_disk = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
         assert on_disk["config_version"] == CURRENT_CONFIG_VERSION
+        assert on_disk["web"]["user_agent"] == _BROWSER_USER_AGENT
         assert on_disk["gemini"]["tts_style"]["audio_tags"] == "auto"
+
+    def test_current_v2_config_with_old_default_user_agent_is_upgraded(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """A v2 config using the old default UA is migrated to the browser UA."""
+        cfg_path = tmp_path / "config.yaml"
+        raw = {
+            "config_version": 2,
+            "web": {"user_agent": "tldr-podcast/1.0"},
+            "gemini": {"tts_style": {"audio_tags": "auto"}},
+        }
+        _write_yaml(cfg_path, raw)
+
+        upgraded = upgrade_config_if_needed(dict(raw), cfg_path)
+
+        assert upgraded["config_version"] == CURRENT_CONFIG_VERSION
+        assert upgraded["web"]["user_agent"] == _BROWSER_USER_AGENT
+
+    def test_custom_user_agent_is_preserved_during_upgrade(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """A user-provided UA is not overwritten by the migration."""
+        cfg_path = tmp_path / "config.yaml"
+        raw = {
+            "config_version": 2,
+            "web": {"user_agent": "custom-client/7.0"},
+            "gemini": {"tts_style": {"audio_tags": "auto"}},
+        }
+        _write_yaml(cfg_path, raw)
+
+        upgraded = upgrade_config_if_needed(dict(raw), cfg_path)
+
+        assert upgraded["config_version"] == CURRENT_CONFIG_VERSION
+        assert upgraded["web"]["user_agent"] == "custom-client/7.0"
 
     def test_v1_upgrade_creates_backup(self, tmp_path: Path) -> None:
         """The original file is copied to <name>.v1.bak before rewriting."""

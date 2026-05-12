@@ -15,6 +15,8 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 import trafilatura
 
+from tldr.user_agent import BROWSER_USER_AGENT
+
 if TYPE_CHECKING:
     from rich.progress import Progress
 
@@ -40,7 +42,11 @@ class ArticleLike(Protocol):
     full_text: str
 
 
-def scrape_article(url: str, timeout: int = 10) -> str | None:
+def scrape_article(
+    url: str,
+    timeout: int = 10,
+    user_agent: str = BROWSER_USER_AGENT,
+) -> str | None:
     """
     Fetch and extract the main text content from a URL.
 
@@ -53,6 +59,9 @@ def scrape_article(url: str, timeout: int = 10) -> str | None:
         The URL of the article to scrape.
     timeout : int, optional
         HTTP request timeout in seconds, by default 10.
+    user_agent : str, optional
+        ``User-Agent`` header to send with the article request, by default
+        a browser-like Chrome UA.
 
     Returns
     -------
@@ -68,7 +77,11 @@ def scrape_article(url: str, timeout: int = 10) -> str | None:
     """
     try:
         logger.debug("Fetching URL: %s", url)
-        downloaded = trafilatura.fetch_url(url, no_ssl=True)
+        downloaded = trafilatura.fetch_url(
+            url,
+            no_ssl=True,
+            headers={"User-Agent": user_agent},
+        )
         if downloaded is None:
             logger.warning("trafilatura.fetch_url returned None for URL: %s", url)
             return None
@@ -90,6 +103,7 @@ def scrape_articles(
     articles: list,
     timeout: int = 10,
     max_articles: int = 15,
+    user_agent: str = BROWSER_USER_AGENT,
     progress: Progress | None = None,
     task_id: Any = None,
 ) -> None:
@@ -110,6 +124,9 @@ def scrape_articles(
         by default 10.
     max_articles : int, optional
         Maximum number of articles to attempt scraping, by default 15.
+    user_agent : str, optional
+        ``User-Agent`` header to send with article requests, by default a
+        browser-like Chrome UA.
     progress : rich.progress.Progress or None, optional
         A rich :class:`~rich.progress.Progress` instance.  When provided,
         ``task_id`` must also be supplied and will be advanced once per
@@ -134,7 +151,7 @@ def scrape_articles(
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_article = {
-            executor.submit(scrape_article, article.url, timeout): article
+            executor.submit(scrape_article, article.url, timeout, user_agent): article
             for article in to_scrape
         }
         for future in as_completed(future_to_article):

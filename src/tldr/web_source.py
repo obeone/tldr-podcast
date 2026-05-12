@@ -19,6 +19,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 from tldr.models import Article
+from tldr.user_agent import BROWSER_USER_AGENT
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +46,7 @@ SUPPORTED_TOPICS: tuple[str, ...] = (
 )
 
 _BASE_URL = "https://tldr.tech"
-_DEFAULT_USER_AGENT = "tldr-podcast/1.0"
+_DEFAULT_USER_AGENT = BROWSER_USER_AGENT
 _DEFAULT_TIMEOUT_SECONDS = 15
 
 _SPONSOR_HEADER_PATTERNS = ("sponsor", "together with", "promotion")
@@ -169,7 +170,7 @@ def check_availability(
     timeout_seconds : int, optional
         HTTP request timeout, by default 15.
     user_agent : str, optional
-        ``User-Agent`` header to send, by default ``"tldr-podcast/1.0"``.
+        ``User-Agent`` header to send, by default a browser-like Chrome UA.
 
     Returns
     -------
@@ -358,7 +359,7 @@ def fetch_newsletters(
     timeout_seconds : int, optional
         HTTP request timeout, by default 15.
     user_agent : str, optional
-        ``User-Agent`` header to send, by default ``"tldr-podcast/1.0"``.
+        ``User-Agent`` header to send, by default a browser-like Chrome UA.
 
     Returns
     -------
