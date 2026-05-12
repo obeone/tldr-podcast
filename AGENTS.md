@@ -46,6 +46,12 @@ with the dependency change that requires them. PRs should state the user-facing
 change, note config or dependency impacts, and include command output for tests
 run locally. Every PR must include an appropriate project version bump.
 
+## Repository Hosting & Forgejo Tools
+
+This repository is hosted on Forgejo. Use the `fj` skill for Forgejo
+operations such as pull requests, issues, releases, tags, and workflows. Do
+not use GitHub tooling for this repository.
+
 ## Configuration & Security Tips
 
 Do not commit secrets. Runtime credentials such as `GEMINI_API_KEY` should come
