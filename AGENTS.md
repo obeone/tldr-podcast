@@ -52,6 +52,12 @@ This repository is hosted on Forgejo. Use the `fj` skill for Forgejo
 operations such as pull requests, issues, releases, tags, and workflows. Do
 not use GitHub tooling for this repository.
 
+## Worktree Guidelines
+
+Use a dedicated worktree for large, risky, or multi-file changes. Small,
+targeted edits such as documentation updates, configuration tweaks, or single
+file fixes may be done directly on a feature branch.
+
 ## Configuration & Security Tips
 
 Do not commit secrets. Runtime credentials such as `GEMINI_API_KEY` should come
