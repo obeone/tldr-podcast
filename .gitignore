@@ -9,3 +9,9 @@ __pycache__/
 .pytest_cache/
 dist/
 build/
+
+# Claude Code per-user project state
+.claude/settings.local.json
+.claude/.auto_mode_approved.json
+.claude/.automode-history/
+.claude/.automode-config.backup.*
