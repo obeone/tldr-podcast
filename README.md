@@ -10,6 +10,7 @@
 ![Gemini](https://img.shields.io/badge/Gemini-Flash%20%7C%20TTS-4285F4?logo=googlegemini&logoColor=white)
 ![ffmpeg](https://img.shields.io/badge/ffmpeg-required-007808?logo=ffmpeg&logoColor=white)
 ![Version](https://img.shields.io/badge/version-1.7.2-blue)
+![License](https://img.shields.io/badge/license-MIT-green)
 
 Fetches any combination of [TLDR](https://tldr.tech) topic newsletters,
 LLM-scores the articles, and generates a scripted dialogue + audio via
@@ -33,6 +34,7 @@ Gemini AI. **No email account, no subscription, no API beyond Gemini.**
 - [🏷️ Releasing](#releasing)
 - [🗂️ Project structure](#project-structure)
 - [📜 Changelog](#changelog)
+- [📄 License](#license)
 
 ---
 
@@ -430,7 +432,7 @@ tldr-podcast/
 
 | Version | Highlights |
 | --- | --- |
-| **1.7.2** | PyPI project page (README long description, author, project URLs); install docs use PyPI instead of GitHub |
+| **1.7.2** | MIT license; PyPI project page (README long description, author, project URLs); install docs use PyPI instead of GitHub |
 | **1.7.1** | CI: install ffmpeg in the release test gate; skip ffmpeg-dependent audio-exporter tests when ffmpeg is absent |
 | **1.7.0** | Optional CloakBrowser stealth-browser fallback (`scraping.cloak_fallback: auto\|on\|off`); config schema v4 |
 | **1.6.x** | Dependency security bumps; `trafilatura` 2.0 scraper user-agent fix |
@@ -439,6 +441,14 @@ tldr-podcast/
 | **1.3.0** | Shell completion support (`completions bash\|zsh\|fish`) |
 | **1.2.0** | Numbered topic recap in the conclusion; `--no-audio` flag; out-of-order TTS progress bar |
 | **1.0.0** | **Breaking** — switched from IMAP/email to direct web scraping of [tldr.tech](https://tldr.tech). No account or credentials needed; removed `-e/--eml`, `-s/--status` and the `imap:` config section |
+
+---
+
+<a id="license"></a>
+
+## 📄 License
+
+[MIT](LICENSE) © Grégoire Compagnon
 
 ---
 
