@@ -164,8 +164,8 @@ class TestUpgradeConfigIfNeeded:
         assert upgraded["config_version"] == CURRENT_CONFIG_VERSION
         assert upgraded["scraping"]["cloak_fallback"] == "off"
 
-    def test_v1_upgrade_applies_all_migrations_including_v4(self, tmp_path: Path) -> None:
-        """A full v1→v4 chain produces all expected keys."""
+    def test_v1_upgrade_applies_all_migrations_including_v5(self, tmp_path: Path) -> None:
+        """A full v1→v5 chain produces all expected keys."""
         cfg_path = tmp_path / "config.yaml"
         raw = {
             "web": {"user_agent": "tldr-podcast/1.0"},
@@ -179,3 +179,43 @@ class TestUpgradeConfigIfNeeded:
         assert upgraded["web"]["user_agent"] == _BROWSER_USER_AGENT
         assert upgraded["gemini"]["tts_style"]["audio_tags"] == "auto"
         assert upgraded["scraping"]["cloak_fallback"] == "auto"
+        assert upgraded["web"]["check_delay_min"] == 0.5
+        assert upgraded["web"]["check_delay_max"] == 2.0
+
+    def test_v4_config_gets_check_delay_defaults(self, tmp_path: Path) -> None:
+        """A v4 config is upgraded with web.check_delay_min/max defaults."""
+        cfg_path = tmp_path / "config.yaml"
+        raw = {
+            "config_version": 4,
+            "web": {"user_agent": _BROWSER_USER_AGENT},
+            "gemini": {"tts_style": {"audio_tags": "auto"}},
+            "scraping": {"cloak_fallback": "auto"},
+        }
+        _write_yaml(cfg_path, raw)
+
+        upgraded = upgrade_config_if_needed(dict(raw), cfg_path)
+
+        assert upgraded["config_version"] == CURRENT_CONFIG_VERSION
+        assert upgraded["web"]["check_delay_min"] == 0.5
+        assert upgraded["web"]["check_delay_max"] == 2.0
+
+    def test_v4_config_preserves_user_set_check_delay(self, tmp_path: Path) -> None:
+        """User-set check_delay bounds survive the v4→v5 migration."""
+        cfg_path = tmp_path / "config.yaml"
+        raw = {
+            "config_version": 4,
+            "web": {
+                "user_agent": _BROWSER_USER_AGENT,
+                "check_delay_min": 0,
+                "check_delay_max": 0,
+            },
+            "gemini": {"tts_style": {"audio_tags": "auto"}},
+            "scraping": {"cloak_fallback": "auto"},
+        }
+        _write_yaml(cfg_path, raw)
+
+        upgraded = upgrade_config_if_needed(dict(raw), cfg_path)
+
+        assert upgraded["config_version"] == CURRENT_CONFIG_VERSION
+        assert upgraded["web"]["check_delay_min"] == 0
+        assert upgraded["web"]["check_delay_max"] == 0

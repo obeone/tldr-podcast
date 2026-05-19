@@ -13,6 +13,8 @@ detected and the topic is silently skipped.
 from __future__ import annotations
 
 import logging
+import random
+import time
 from datetime import date
 
 import httpx
@@ -48,6 +50,14 @@ SUPPORTED_TOPICS: tuple[str, ...] = (
 _BASE_URL = "https://tldr.tech"
 _DEFAULT_USER_AGENT = BROWSER_USER_AGENT
 _DEFAULT_TIMEOUT_SECONDS = 15
+
+#: Default ``(min, max)`` seconds for the randomised pause inserted between
+#: successive tldr.tech requests.  Probing all 13 topics back-to-back makes
+#: ``tldr.tech`` rate-limit the burst and answer ``404`` for editions that
+#: actually exist; a jittered delay spreads the requests out and avoids the
+#: false negatives.  Set both bounds to ``0`` (or pass ``delay_range=None``)
+#: to restore the old concurrent, no-delay behaviour.
+_DEFAULT_CHECK_DELAY_RANGE: tuple[float, float] = (0.5, 2.0)
 
 _SPONSOR_HEADER_PATTERNS = ("sponsor", "together with", "promotion")
 _SPONSOR_URL_MARKER = "utm_source=tldrnewsletter&utm_medium=sponsor"
@@ -146,20 +156,99 @@ def _strip_read_time(title: str) -> str:
     ).strip()
 
 
+def _normalise_delay_range(
+    delay_range: tuple[float, float] | None,
+) -> tuple[float, float] | None:
+    """
+    Coerce a caller-supplied delay range into a sane ``(lo, hi)`` tuple.
+
+    Negative bounds are clamped to ``0`` and a reversed pair is swapped so
+    callers cannot accidentally pass ``(2, 1)``.  When the resulting upper
+    bound is ``0`` (or *delay_range* is ``None``) the jitter is considered
+    disabled and ``None`` is returned, which signals the concurrent,
+    no-delay code path.
+
+    Parameters
+    ----------
+    delay_range : tuple[float, float] or None
+        Requested ``(min, max)`` pause in seconds, or ``None`` to disable.
+
+    Returns
+    -------
+    tuple[float, float] or None
+        A normalised ``(lo, hi)`` with ``0 <= lo <= hi`` and ``hi > 0``, or
+        ``None`` when delays are disabled.
+    """
+    if delay_range is None:
+        return None
+    lo, hi = (float(delay_range[0]), float(delay_range[1]))
+    lo = max(0.0, lo)
+    hi = max(0.0, hi)
+    if hi < lo:
+        lo, hi = hi, lo
+    if hi <= 0.0:
+        return None
+    return (lo, hi)
+
+
+def _jitter_sleep(delay_range: tuple[float, float]) -> None:
+    """
+    Sleep a random duration uniformly drawn from *delay_range*.
+
+    Parameters
+    ----------
+    delay_range : tuple[float, float]
+        Already-normalised ``(lo, hi)`` bounds in seconds.
+    """
+    pause = random.uniform(*delay_range)
+    logger.debug("Throttling tldr.tech: sleeping %.2fs before next request…", pause)
+    time.sleep(pause)
+
+
+def _throttle(index: int, delay_range: tuple[float, float] | None) -> None:
+    """
+    Pause before request *index* to spread successive tldr.tech calls out.
+
+    A no-op for the first request (``index == 0``) and whenever throttling
+    is disabled (*delay_range* is ``None``).  Centralising both guards here
+    keeps every call site in sync — the sequential probe loop and the
+    newsletter fetch loop must apply the exact same "between requests,
+    never before the first" rule.
+
+    Parameters
+    ----------
+    index : int
+        Zero-based position of the request about to be made.
+    delay_range : tuple[float, float] or None
+        Already-normalised ``(lo, hi)`` bounds, or ``None`` when disabled.
+    """
+    if index > 0 and delay_range is not None:
+        _jitter_sleep(delay_range)
+
+
 def check_availability(
     topics: list[str],
     target_date: date,
     *,
     timeout_seconds: int = _DEFAULT_TIMEOUT_SECONDS,
     user_agent: str = _DEFAULT_USER_AGENT,
+    delay_range: tuple[float, float] | None = _DEFAULT_CHECK_DELAY_RANGE,
 ) -> list[str]:
     """
     Return the subset of *topics* that have a published newsletter on *target_date*.
 
-    Each URL is probed with a ``HEAD`` request (``follow_redirects=False``)
-    in parallel threads.  Any 3xx response means ``tldr.tech`` is about to
-    redirect to the bare topic page → no edition for this date.  All other
-    successful responses (``2xx``) are treated as available.
+    Each URL is probed with a ``HEAD`` request (``follow_redirects=False``).
+    Any 3xx response means ``tldr.tech`` is about to redirect to the bare
+    topic page → no edition for this date.  All other successful responses
+    (``2xx``) are treated as available.
+
+    By default the probes run **sequentially** with a randomised pause
+    between successive requests (see *delay_range*).  Firing all 13 topics
+    concurrently makes ``tldr.tech`` rate-limit the burst and answer
+    ``404`` for editions that actually exist; the jittered delay spreads
+    the requests out and removes those false negatives.  Pass
+    ``delay_range=None`` (or a zero range) to restore the old concurrent,
+    no-delay behaviour.
 
     Parameters
     ----------
@@ -171,15 +260,19 @@ def check_availability(
         HTTP request timeout, by default 15.
     user_agent : str, optional
         ``User-Agent`` header to send, by default a browser-like Chrome UA.
+    delay_range : tuple[float, float] or None, optional
+        ``(min, max)`` seconds for the randomised pause inserted *between*
+        successive probes (never before the first or after the last).
+        Defaults to :data:`_DEFAULT_CHECK_DELAY_RANGE`.  ``None`` or a zero
+        range disables the delay and probes every topic concurrently.
 
     Returns
     -------
     list[str]
         Topics in the same order as *topics* whose edition exists.
     """
-    import concurrent.futures
-
     headers = {"User-Agent": user_agent}
+    norm_delay = _normalise_delay_range(delay_range)
 
     def _probe(topic: str) -> tuple[str, bool]:
         url = _build_url(topic, target_date)
@@ -193,8 +286,19 @@ def check_availability(
             return topic, False
         return topic, True
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=len(topics) or 1) as pool:
-        results = dict(pool.map(_probe, topics))
+    if norm_delay is None:
+        import concurrent.futures
+
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=len(topics) or 1
+        ) as pool:
+            results = dict(pool.map(_probe, topics))
+    else:
+        results: dict[str, bool] = {}
+        for index, topic in enumerate(topics):
+            _throttle(index, norm_delay)
+            probed_topic, available = _probe(topic)
+            results[probed_topic] = available
 
     return [t for t in topics if results.get(t)]
 
@@ -340,6 +444,7 @@ def fetch_newsletters(
     *,
     timeout_seconds: int = _DEFAULT_TIMEOUT_SECONDS,
     user_agent: str = _DEFAULT_USER_AGENT,
+    delay_range: tuple[float, float] | None = _DEFAULT_CHECK_DELAY_RANGE,
 ) -> list[Article]:
     """
     Fetch TLDR newsletters for each topic on *target_date* and merge them.
@@ -347,7 +452,9 @@ def fetch_newsletters(
     Topics that do not publish on the given date (``tldr.tech`` redirects
     to the bare topic page) are skipped silently with a warning log.
     Articles that appear in multiple newsletters are deduplicated by URL,
-    keeping the first occurrence.
+    keeping the first occurrence.  A randomised pause is inserted between
+    successive topic requests (see *delay_range*) so the sequential fetch
+    does not hammer ``tldr.tech`` right after the availability probe.
 
     Parameters
     ----------
@@ -360,6 +467,11 @@ def fetch_newsletters(
         HTTP request timeout, by default 15.
     user_agent : str, optional
         ``User-Agent`` header to send, by default a browser-like Chrome UA.
+    delay_range : tuple[float, float] or None, optional
+        ``(min, max)`` seconds for the randomised pause inserted *between*
+        successive topic requests (never before the first or after the
+        last).  Defaults to :data:`_DEFAULT_CHECK_DELAY_RANGE`.  ``None``
+        or a zero range disables the delay.
 
     Returns
     -------
@@ -369,8 +481,10 @@ def fetch_newsletters(
     """
     seen_urls: set[str] = set()
     merged: list[Article] = []
+    norm_delay = _normalise_delay_range(delay_range)
 
-    for topic in topics:
+    for index, topic in enumerate(topics):
+        _throttle(index, norm_delay)
         url = _build_url(topic, target_date)
         logger.info("Fetching TLDR %s for %s…", topic, target_date.isoformat())
         html = _fetch_page(

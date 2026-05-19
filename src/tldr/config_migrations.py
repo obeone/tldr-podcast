@@ -31,7 +31,7 @@ from tldr.user_agent import BROWSER_USER_AGENT
 logger = logging.getLogger(__name__)
 
 # Current schema version.  Bump this whenever you add a migration below.
-CURRENT_CONFIG_VERSION: int = 4
+CURRENT_CONFIG_VERSION: int = 5
 
 _OLD_DEFAULT_USER_AGENT = "tldr-podcast/1.0"
 
@@ -107,10 +107,38 @@ def _migrate_3_to_4(raw: dict[str, Any]) -> dict[str, Any]:
     return raw
 
 
+def _migrate_4_to_5(raw: dict[str, Any]) -> dict[str, Any]:
+    """
+    Add ``web.check_delay_min`` / ``web.check_delay_max`` for request throttling.
+
+    Probing every tldr.tech topic back-to-back makes the site rate-limit
+    the burst and answer ``404`` for editions that actually exist.  These
+    keys bound the randomised pause (seconds) inserted between successive
+    requests.  The defaults (``0.5`` / ``2.0``) enable throttling; set both
+    to ``0`` to restore the old concurrent, no-delay behaviour.  Existing
+    user-set values are preserved via ``setdefault`` semantics.
+
+    Parameters
+    ----------
+    raw : dict
+        The raw config dict at schema version 4.
+
+    Returns
+    -------
+    dict
+        Config dict upgraded to schema version 5.
+    """
+    web = raw.setdefault("web", {})
+    web.setdefault("check_delay_min", 0.5)
+    web.setdefault("check_delay_max", 2.0)
+    return raw
+
+
 MIGRATIONS: list[tuple[int, Callable[[dict[str, Any]], dict[str, Any]]]] = [
     (1, _migrate_1_to_2),
     (2, _migrate_2_to_3),
     (3, _migrate_3_to_4),
+    (4, _migrate_4_to_5),
 ]
 
 # Enforce a contiguous migration chain from v1 to CURRENT_CONFIG_VERSION.

@@ -208,14 +208,17 @@ def _select_topics_interactive(
     *,
     web_timeout: int,
     web_user_agent: str,
+    check_delay_range: tuple[float, float] | None,
 ) -> list[str]:
     """
     Display an interactive checkbox restricted to topics published on *target_date*.
 
-    Availability is probed in parallel with HEAD requests before the prompt
-    so users only pick from editions that actually exist for the target
-    date.  Falls back to returning *default_topics* when ``questionary`` is
-    not available or when stdin is not a TTY.
+    Availability is probed with HEAD requests before the prompt so users
+    only pick from editions that actually exist for the target date.  The
+    probes are throttled with a randomised inter-request delay
+    (*check_delay_range*) to avoid ``tldr.tech`` rate-limiting the burst
+    and returning false ``404``s.  Falls back to returning *default_topics*
+    when ``questionary`` is not available or when stdin is not a TTY.
 
     Parameters
     ----------
@@ -227,6 +230,9 @@ def _select_topics_interactive(
         HTTP request timeout (seconds) for the availability probe.
     web_user_agent : str
         ``User-Agent`` header sent with the probe.
+    check_delay_range : tuple[float, float] or None
+        ``(min, max)`` seconds for the randomised pause between successive
+        availability probes.  ``None`` or a zero range probes concurrently.
 
     Returns
     -------
@@ -249,6 +255,7 @@ def _select_topics_interactive(
         target_date,
         timeout_seconds=web_timeout,
         user_agent=web_user_agent,
+        delay_range=check_delay_range,
     )
 
     if not available:
@@ -452,6 +459,14 @@ def run(
     web_user_agent: str = web_cfg.get("user_agent", BROWSER_USER_AGENT)
     default_topics: list[str] = web_cfg.get("default_topics", ["ai", "infosec", "devops"])
 
+    # Randomised pause between successive tldr.tech requests.  Probing all
+    # topics back-to-back makes tldr.tech rate-limit the burst and answer
+    # 404 for editions that exist; the jitter spreads requests out.  Set
+    # both bounds to 0 to disable (restores concurrent, no-delay probing).
+    check_delay_min: float = float(web_cfg.get("check_delay_min", 0.5))
+    check_delay_max: float = float(web_cfg.get("check_delay_max", 2.0))
+    check_delay_range: tuple[float, float] = (check_delay_min, check_delay_max)
+
     service_tier: str | None = gemini_cfg.get("service_tier") or None
     if service_tier:
         logger.info("Gemini service tier: %s", service_tier)
@@ -480,6 +495,7 @@ def run(
             target_date,
             web_timeout=web_timeout,
             web_user_agent=web_user_agent,
+            check_delay_range=check_delay_range,
         )
 
     logger.info("Topics: %s  |  Date: %s", ", ".join(topics), target_date.isoformat())
@@ -493,6 +509,7 @@ def run(
         target_date,
         timeout_seconds=web_timeout,
         user_agent=web_user_agent,
+        delay_range=check_delay_range,
     )
 
     if not all_articles:
@@ -724,6 +741,14 @@ def config_init(output_path: str) -> None:
         "HTTP timeout (seconds)",
         _get("web", "timeout_seconds", "15"),
     )
+    web_check_delay_min = _prompt(
+        "Min delay between tldr.tech checks (seconds, 0 to disable)",
+        _get("web", "check_delay_min", "0.5"),
+    )
+    web_check_delay_max = _prompt(
+        "Max delay between tldr.tech checks (seconds, 0 to disable)",
+        _get("web", "check_delay_max", "2.0"),
+    )
 
     # ── Gemini ────────────────────────────────────────────────────────────
     click.echo("\n── Gemini ────────────────────────────────────────────────────")
@@ -774,6 +799,8 @@ def config_init(output_path: str) -> None:
             "default_topics": parsed_default_topics,
             "user_agent": web_user_agent,
             "timeout_seconds": int(web_timeout),
+            "check_delay_min": float(web_check_delay_min),
+            "check_delay_max": float(web_check_delay_max),
         },
         "gemini": {
             "api_key_env": gemini_key_env,
