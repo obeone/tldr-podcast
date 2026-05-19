@@ -1,12 +1,13 @@
 name: Publish
 
-# Triggered only when pyproject.toml changes on main. The `detect` job then
-# confirms the `project.version` value actually changed versus the parent
-# commit (a plain dependency bump must not trigger a release) and skips when
-# the matching tag already exists, so re-runs and unrelated edits are no-ops.
-# On a genuine bump: tests gate the release, the package is built and pushed
-# to PyPI via Trusted Publishing (OIDC, no stored secret), then a GitHub
-# release is cut for the new version.
+# Triggered when pyproject.toml changes on main. The `detect` job reads the
+# current project.version and releases it only when no matching v<version>
+# git tag exists yet. This is independent of merge strategy (squash, rebase,
+# multi-commit — the bump need not be in the tip commit) and idempotent:
+# re-runs and dependency-only edits to an already-released version are no-ops.
+# On an unreleased version: tests gate the release, the package is built and
+# pushed to PyPI via Trusted Publishing (OIDC, no stored secret), then a
+# v<version> GitHub release is cut.
 
 on:
   push:
@@ -30,31 +31,17 @@ jobs:
       version: ${{ steps.check.outputs.version }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 2
       - id: check
         shell: bash
         run: |
           set -euo pipefail
-          read_version() {
-            python3 -c 'import sys, tomllib; print(tomllib.load(open(sys.argv[1], "rb"))["project"]["version"])' "$1"
-          }
-          new="$(read_version pyproject.toml)"
-          if git show "HEAD~1:pyproject.toml" > /tmp/prev_pyproject.toml 2>/dev/null; then
-            old="$(read_version /tmp/prev_pyproject.toml 2>/dev/null || echo none)"
-          else
-            old="none"
-          fi
-          echo "Previous version: $old — current version: $new"
-          echo "version=$new" >> "$GITHUB_OUTPUT"
-          if [ "$new" = "$old" ]; then
-            echo "Version unchanged — nothing to publish."
-            echo "bumped=false" >> "$GITHUB_OUTPUT"
-          elif git ls-remote --exit-code --tags origin "refs/tags/v$new" >/dev/null 2>&1; then
-            echo "Tag v$new already exists on origin — already released, skipping."
+          version="$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if git ls-remote --exit-code --tags origin "refs/tags/v$version" >/dev/null 2>&1; then
+            echo "v$version is already released (tag exists) — nothing to publish."
             echo "bumped=false" >> "$GITHUB_OUTPUT"
           else
-            echo "Version bumped $old -> $new — release pipeline will run."
+            echo "v$version has no release tag yet — release pipeline will run."
             echo "bumped=true" >> "$GITHUB_OUTPUT"
           fi
 
@@ -94,6 +81,7 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist/
+          skip-existing: true
 
   release:
     name: GitHub release
