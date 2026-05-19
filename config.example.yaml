@@ -12,6 +12,14 @@ web:
   user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
   # HTTP timeout in seconds for newsletter page fetches
   timeout_seconds: 15
+  # Randomised pause (seconds) inserted between successive tldr.tech
+  # requests, both for the availability probe and the newsletter fetch.
+  # Probing every topic back-to-back makes tldr.tech rate-limit the burst
+  # and return 404 for editions that actually exist; the jitter spreads
+  # the requests out and removes those false negatives.
+  # Set both bounds to 0 to disable (restores concurrent, no-delay probing).
+  check_delay_min: 1.0
+  check_delay_max: 3.0
 
 gemini:
   # Name of the environment variable holding your Gemini API key

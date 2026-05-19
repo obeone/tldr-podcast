@@ -21,6 +21,7 @@ from tldr.web_source import (
     _build_url,
     _is_sponsor_article,
     _is_sponsor_section,
+    _normalise_delay_range,
     _parse_html,
     _strip_read_time,
     check_availability,
@@ -317,7 +318,9 @@ class TestFetchNewsletters:
     def test_dedup_across_topics(self) -> None:
         """Same URLs from two topics are deduplicated to one entry each."""
         with patch("tldr.web_source._fetch_page", return_value=_MINIMAL_HTML):
-            articles = fetch_newsletters(["infosec", "tech"], date(2026, 4, 6))
+            articles = fetch_newsletters(
+                ["infosec", "tech"], date(2026, 4, 6), delay_range=None
+            )
         # 3 unique articles, not 6
         assert len(articles) == 3
 
@@ -348,7 +351,9 @@ class TestFetchNewsletters:
             return html_a if "infosec" in url else html_b
 
         with patch("tldr.web_source._fetch_page", side_effect=_fake_fetch):
-            articles = fetch_newsletters(["infosec", "devops"], date(2026, 4, 6))
+            articles = fetch_newsletters(
+                ["infosec", "devops"], date(2026, 4, 6), delay_range=None
+            )
 
         assert len(articles) == 2
         urls = {a.url for a in articles}
@@ -366,7 +371,9 @@ class TestFetchNewsletters:
     def test_all_topics_redirect_returns_empty(self) -> None:
         """When every topic redirects, an empty list is returned."""
         with patch("tldr.web_source._fetch_page", return_value=None):
-            articles = fetch_newsletters(["ai", "devops", "infosec"], date(2026, 4, 6))
+            articles = fetch_newsletters(
+                ["ai", "devops", "infosec"], date(2026, 4, 6), delay_range=None
+            )
         assert articles == []
 
     def test_partial_redirect_keeps_working_topic(self) -> None:
@@ -375,7 +382,9 @@ class TestFetchNewsletters:
             return None if "infosec" in url else _MINIMAL_HTML
 
         with patch("tldr.web_source._fetch_page", side_effect=_fake_fetch):
-            articles = fetch_newsletters(["infosec", "devops"], date(2026, 4, 6))
+            articles = fetch_newsletters(
+                ["infosec", "devops"], date(2026, 4, 6), delay_range=None
+            )
 
         assert len(articles) == 3
 
@@ -435,7 +444,12 @@ class TestRealFixture:
 
 
 class TestCheckAvailability:
-    """check_availability() filters out redirected topic URLs in parallel."""
+    """check_availability() filters out redirected topic URLs.
+
+    These cases pass ``delay_range=None`` to exercise the concurrent,
+    no-delay code path; the sequential jitter behaviour has dedicated
+    tests in :class:`TestCheckAvailabilityThrottle`.
+    """
 
     def test_default_user_agent_matches_browser(self) -> None:
         """The default web-source User-Agent is a browser-like Chrome UA."""
@@ -465,6 +479,7 @@ class TestCheckAvailability:
             result = check_availability(
                 ["ai", "infosec", "devops", "crypto"],
                 date(2026, 4, 17),
+                delay_range=None,
             )
         assert result == ["ai", "devops"]
 
@@ -479,6 +494,7 @@ class TestCheckAvailability:
             result = check_availability(
                 ["devops", "ai", "infosec"],
                 date(2026, 4, 17),
+                delay_range=None,
             )
         assert result == ["devops", "ai", "infosec"]
 
@@ -491,5 +507,166 @@ class TestCheckAvailability:
             raise httpx.ConnectError("boom")
 
         with patch("httpx.Client.head", new=_fake_head):
-            result = check_availability(["ai", "devops"], date(2026, 4, 17))
+            result = check_availability(
+                ["ai", "devops"], date(2026, 4, 17), delay_range=None
+            )
         assert result == []
+
+
+# ---------------------------------------------------------------------------
+# Request throttling: jittered inter-request delay
+# ---------------------------------------------------------------------------
+
+
+class TestNormaliseDelayRange:
+    """_normalise_delay_range() coerces caller input into a sane (lo, hi)."""
+
+    def test_none_disables_delay(self) -> None:
+        """An explicit None means 'no delay' (concurrent path)."""
+        assert _normalise_delay_range(None) is None
+
+    def test_zero_range_disables_delay(self) -> None:
+        """A (0, 0) range is treated as disabled."""
+        assert _normalise_delay_range((0, 0)) is None
+
+    def test_reversed_bounds_are_swapped(self) -> None:
+        """A (max, min) pair is normalised to (min, max)."""
+        assert _normalise_delay_range((2.0, 0.5)) == (0.5, 2.0)
+
+    def test_negative_bounds_are_clamped_to_zero(self) -> None:
+        """Negative bounds clamp to 0; a positive upper bound stays enabled."""
+        assert _normalise_delay_range((-1.0, 1.5)) == (0.0, 1.5)
+
+    def test_valid_range_passes_through(self) -> None:
+        """A well-formed range is returned unchanged (as floats)."""
+        assert _normalise_delay_range((0.5, 2.0)) == (0.5, 2.0)
+
+
+class TestCheckAvailabilityThrottle:
+    """check_availability() throttles sequential probes with a jitter delay."""
+
+    def _make_head_response(self, url: str, status_code: int) -> object:
+        from unittest.mock import MagicMock
+
+        response = MagicMock()
+        response.status_code = status_code
+        response.is_redirect = 300 <= status_code < 400
+        response.request = MagicMock()
+        return response
+
+    def test_sequential_jitter_sleeps_between_probes(self) -> None:
+        """N topics ⇒ N-1 jittered sleeps, drawn from the delay range."""
+        from unittest.mock import patch
+
+        def _fake_head(self_, url, follow_redirects=False):
+            return self._make_head_response(url, 200)
+
+        with (
+            patch("httpx.Client.head", new=_fake_head),
+            patch("tldr.web_source.random.uniform", return_value=0.7) as uniform,
+            patch("tldr.web_source.time.sleep") as sleep,
+        ):
+            result = check_availability(
+                ["ai", "infosec", "devops"],
+                date(2026, 4, 17),
+                delay_range=(0.5, 2.0),
+            )
+
+        assert result == ["ai", "infosec", "devops"]
+        # 3 topics → exactly 2 inter-request pauses, never before the first.
+        assert sleep.call_count == 2
+        sleep.assert_called_with(0.7)
+        uniform.assert_called_with(0.5, 2.0)
+
+    def test_single_topic_never_sleeps(self) -> None:
+        """A single probe has no 'between' gap, so no sleep happens."""
+        from unittest.mock import patch
+
+        def _fake_head(self_, url, follow_redirects=False):
+            return self._make_head_response(url, 200)
+
+        with (
+            patch("httpx.Client.head", new=_fake_head),
+            patch("tldr.web_source.time.sleep") as sleep,
+        ):
+            result = check_availability(
+                ["ai"], date(2026, 4, 17), delay_range=(0.5, 2.0)
+            )
+
+        assert result == ["ai"]
+        sleep.assert_not_called()
+
+    def test_zero_range_uses_concurrent_path_without_sleeping(self) -> None:
+        """A zero range disables the delay entirely (no sleep call)."""
+        from unittest.mock import patch
+
+        def _fake_head(self_, url, follow_redirects=False):
+            return self._make_head_response(url, 200)
+
+        with (
+            patch("httpx.Client.head", new=_fake_head),
+            patch("tldr.web_source.time.sleep") as sleep,
+        ):
+            result = check_availability(
+                ["ai", "devops"], date(2026, 4, 17), delay_range=(0, 0)
+            )
+
+        assert result == ["ai", "devops"]
+        sleep.assert_not_called()
+
+
+class TestFetchNewslettersThrottle:
+    """fetch_newsletters() pauses between successive topic requests."""
+
+    def test_jitter_sleeps_between_topic_fetches(self) -> None:
+        """3 topics ⇒ 2 jittered sleeps; sleep never precedes the first fetch."""
+        from unittest.mock import patch
+
+        with (
+            patch("tldr.web_source._fetch_page", return_value=None),
+            patch("tldr.web_source.random.uniform", return_value=1.1),
+            patch("tldr.web_source.time.sleep") as sleep,
+        ):
+            fetch_newsletters(
+                ["ai", "devops", "infosec"],
+                date(2026, 4, 6),
+                delay_range=(0.5, 2.0),
+            )
+
+        assert sleep.call_count == 2
+        sleep.assert_called_with(1.1)
+
+    def test_delay_runs_even_when_requests_are_skipped(self) -> None:
+        """The pause throttles the HTTP request rate regardless of outcome.
+
+        Every topic here redirects (``_fetch_page`` → None), yet the
+        inter-request delay must still fire so a long run of skipped
+        topics does not turn into an un-throttled burst.
+        """
+        from unittest.mock import patch
+
+        with (
+            patch("tldr.web_source._fetch_page", return_value=None),
+            patch("tldr.web_source.random.uniform", return_value=0.9),
+            patch("tldr.web_source.time.sleep") as sleep,
+        ):
+            articles = fetch_newsletters(
+                ["ai", "devops"], date(2026, 4, 6), delay_range=(0.5, 2.0)
+            )
+
+        assert articles == []
+        assert sleep.call_count == 1
+
+    def test_delay_range_none_never_sleeps(self) -> None:
+        """delay_range=None disables the throttle in the fetch path too."""
+        from unittest.mock import patch
+
+        with (
+            patch("tldr.web_source._fetch_page", return_value=None),
+            patch("tldr.web_source.time.sleep") as sleep,
+        ):
+            fetch_newsletters(
+                ["ai", "devops", "infosec"], date(2026, 4, 6), delay_range=None
+            )
+
+        sleep.assert_not_called()

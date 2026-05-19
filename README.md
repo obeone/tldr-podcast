@@ -9,7 +9,7 @@
 ![uv](https://img.shields.io/badge/built%20with-uv-DE5FE9?logo=uv&logoColor=white)
 ![Gemini](https://img.shields.io/badge/Gemini-Flash%20%7C%20TTS-4285F4?logo=googlegemini&logoColor=white)
 ![ffmpeg](https://img.shields.io/badge/ffmpeg-required-007808?logo=ffmpeg&logoColor=white)
-![Version](https://img.shields.io/badge/version-1.7.3-blue)
+![Version](https://img.shields.io/badge/version-1.8.0-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 Fetches any combination of [TLDR](https://tldr.tech) topic newsletters,
@@ -190,10 +190,12 @@ Default path: `$XDG_CONFIG_HOME/tldr/config.yaml`
 A minimal config looks like this:
 
 ```yaml
-config_version: 6
+config_version: 5
 
 web:
   default_topics: [ ai, infosec, devops ]
+  check_delay_min: 1.0   # randomised pause (s) between tldr.tech requests…
+  check_delay_max: 3.0   # …avoids rate-limit 404s; set both to 0 to disable
 
 gemini:
   api_key_env: GEMINI_API_KEY        # name of the env var — never the key itself
@@ -432,6 +434,7 @@ tldr-podcast/
 
 | Version | Highlights |
 | --- | --- |
+| **1.8.0** | Throttled tldr.tech requests: randomised inter-request delay (`web.check_delay_min`/`web.check_delay_max`, default 1–3 s) for the availability probe and newsletter fetch — fixes false `404`s from rate-limiting the topic burst; config schema v5 |
 | **1.7.3** | Tag-based release detection (robust to rebase/squash merges) + `skip-existing` on publish; MIT license; PyPI project page (README long description, author, project URLs); install docs use PyPI instead of GitHub |
 | **1.7.1** | CI: install ffmpeg in the release test gate; skip ffmpeg-dependent audio-exporter tests when ffmpeg is absent |
 | **1.7.0** | Optional CloakBrowser stealth-browser fallback (`scraping.cloak_fallback: auto\|on\|off`); config schema v4 |
