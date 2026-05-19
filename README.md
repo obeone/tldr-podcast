@@ -30,6 +30,7 @@ Gemini AI. **No email account, no subscription, no API beyond Gemini.**
 - [🖥️ CLI reference](#cli-reference)
 - [🐚 Shell completions](#shell-completions)
 - [🧪 Tests](#tests)
+- [🏷️ Releasing](#releasing)
 - [🗂️ Project structure](#project-structure)
 - [📜 Changelog](#changelog)
 
@@ -305,6 +306,29 @@ uv run pytest tests/ -v
 
 All external APIs (Gemini, HTTP) are mocked. A real captured TLDR HTML
 page in `tests/fixtures/` drives realistic parse validation.
+
+---
+
+<a id="releasing"></a>
+
+## 🏷️ Releasing
+
+Releases are automated by
+[`.github/workflows/publish.yml`](.github/workflows/publish.yml). Bumping
+`version` in `pyproject.toml` and pushing to `main` runs, in order:
+
+1. **Tests** — `uv run pytest` must pass; a red suite blocks the release.
+2. **PyPI publish** — built with `uv build` and uploaded via
+   [Trusted Publishing](https://docs.pypi.org/trusted-publishers/) (OIDC, no
+   stored token). Requires a publisher configured on PyPI for project
+   `tldr-podcast`, repository `obeone/tldr-podcast`, workflow `publish.yml`,
+   environment `pypi`.
+3. **GitHub release** — a `v<version>` tag plus a release with
+   auto-generated notes.
+
+Dependency-only edits to `pyproject.toml` are ignored (the `version` value
+must actually change), and an already-released version is skipped, so re-runs
+and unrelated edits are safe no-ops.
 
 ---
 
