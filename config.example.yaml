@@ -58,6 +58,14 @@ scraping:
   max_articles: 15
   # HTTP request timeout in seconds
   timeout_seconds: 10
+  # Browser fallback when trafilatura fails to fetch or extract an article.
+  # Uses CloakBrowser (a stealth Chromium that bypasses bot detection) to
+  # render the page, then re-extracts the text.  Requires the optional extra:
+  #   pip install "tldr-podcast[cloak]"   (downloads a ~200MB browser binary)
+  #   auto — use it automatically when the 'cloakbrowser' package is importable (default)
+  #   on   — require it; warns and degrades to summaries if not installed
+  #   off  — never use the browser fallback
+  cloak_fallback: auto
 
 output:
   # Directory where the generated podcast file will be saved.

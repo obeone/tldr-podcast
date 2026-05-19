@@ -434,6 +434,7 @@ def run(
 
     max_articles: int = scraping_cfg.get("max_articles", 15)
     scrape_timeout: int = scraping_cfg.get("timeout_seconds", 10)
+    cloak_fallback: str = scraping_cfg.get("cloak_fallback", "auto")
 
     # Output dir: CLI override > config output.dir > cwd
     output_dir: str = (
@@ -545,6 +546,7 @@ def run(
             timeout=scrape_timeout,
             max_articles=max_articles,
             user_agent=web_user_agent,
+            cloak_fallback=cloak_fallback,
             progress=progress,
             task_id=scrape_task,
         )
@@ -789,7 +791,7 @@ def config_init(output_path: str) -> None:
                 "personality": sp2_personality,
             },
         },
-        "scraping": existing.get("scraping", {"max_articles": 15, "timeout_seconds": 10}),
+        "scraping": existing.get("scraping", {"max_articles": 15, "timeout_seconds": 10, "cloak_fallback": "auto"}),
         "output": {
             "dir": output_dir,
             "format": output_fmt,
