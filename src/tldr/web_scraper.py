@@ -14,6 +14,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import TYPE_CHECKING, Any, Protocol
 
 import trafilatura
+from trafilatura.settings import use_config
 
 from tldr.user_agent import BROWSER_USER_AGENT
 
@@ -77,11 +78,10 @@ def scrape_article(
     """
     try:
         logger.debug("Fetching URL: %s", url)
-        downloaded = trafilatura.fetch_url(
-            url,
-            no_ssl=True,
-            headers={"User-Agent": user_agent},
-        )
+        cfg = use_config()
+        cfg.set("DEFAULT", "USER_AGENTS", user_agent)
+        cfg.set("DEFAULT", "DOWNLOAD_TIMEOUT", str(timeout))
+        downloaded = trafilatura.fetch_url(url, no_ssl=True, config=cfg)
         if downloaded is None:
             logger.warning("trafilatura.fetch_url returned None for URL: %s", url)
             return None
