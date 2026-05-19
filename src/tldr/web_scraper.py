@@ -13,6 +13,7 @@ from __future__ import annotations
 import importlib.util
 import logging
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import TYPE_CHECKING, Any, Protocol
 
@@ -31,6 +32,14 @@ logger = logging.getLogger(__name__)
 # reach the browser fallback are bounded here to 2 concurrent instances.
 _CLOAK_MAX_CONCURRENCY = 2
 _CLOAK_SEMAPHORE = threading.BoundedSemaphore(_CLOAK_MAX_CONCURRENCY)
+
+# Maximum seconds to wait for a Cloudflare challenge to auto-resolve.
+# This is a bounded budget separate from the per-article HTTP timeout.
+_CLOAK_CHALLENGE_WAIT_S = 35
+
+# HTML substrings that indicate the page is still showing a Cloudflare
+# challenge interstitial rather than the real article content.
+_CLOAK_CHALLENGE_MARKERS = ("challenge-platform", "/cdn-cgi/chl", "turnstile", "just a moment")
 
 
 class ArticleLike(Protocol):
@@ -106,12 +115,42 @@ def _resolve_use_cloak(cloak_fallback: str) -> bool:
     return available
 
 
+def _cloak_safe_content(page: Any) -> str:
+    """
+    Retrieve the current HTML content of a CloakBrowser page, with retries.
+
+    Cloudflare reloads the page during challenge resolution, which can cause
+    Playwright to raise "Page.content: Unable to retrieve content because the
+    page is navigating".  This helper retries up to 12 times, sleeping 0.5 s
+    between attempts, and returns ``""`` if it never succeeds.  Never raises.
+
+    Parameters
+    ----------
+    page : Any
+        A CloakBrowser / Playwright page object exposing a ``content()``
+        method.
+
+    Returns
+    -------
+    str
+        The page's current HTML source, or ``""`` if all attempts fail.
+    """
+    for _ in range(12):
+        try:
+            return page.content()
+        except Exception:  # noqa: BLE001
+            time.sleep(0.5)
+    return ""
+
+
 def _scrape_with_cloak(url: str, timeout: int = 10) -> str | None:
     """
     Attempt to scrape a URL using the CloakBrowser stealth browser.
 
     Acquires a concurrency semaphore before launching Chromium to prevent
-    memory exhaustion.  Never raises; returns ``None`` on any failure.
+    memory exhaustion.  Waits for any Cloudflare challenge interstitial to
+    resolve before reading the page content.  Never raises; returns ``None``
+    on any failure.
 
     Note: CloakBrowser manages its own stealth fingerprint, so no
     custom User-Agent is passed — overriding it would defeat the stealth.
@@ -121,8 +160,8 @@ def _scrape_with_cloak(url: str, timeout: int = 10) -> str | None:
     url : str
         The URL to render and extract text from.
     timeout : int, optional
-        Navigation timeout in seconds, by default 10.  Passed to
-        ``page.goto`` as milliseconds.
+        Navigation timeout in seconds, by default 10.  The goto call uses
+        ``max(timeout, 30)`` seconds to allow for Cloudflare JS execution.
 
     Returns
     -------
@@ -140,19 +179,37 @@ def _scrape_with_cloak(url: str, timeout: int = 10) -> str | None:
                 return None
 
             logger.info("Trying CloakBrowser browser fallback for: %s", url)
-            browser = cloakbrowser.launch(headless=True)
+            # humanize=True enables human-like interaction timing, which is
+            # required for Cloudflare Turnstile challenge resolution.
+            browser = cloakbrowser.launch(headless=True, humanize=True)
             page = browser.new_page()
 
             try:
-                page.goto(url, timeout=timeout * 1000)
+                page.goto(url, wait_until="domcontentloaded", timeout=max(timeout, 30) * 1000)
             except Exception as goto_exc:  # noqa: BLE001
                 logger.warning(
                     "CloakBrowser goto failed for %s: %s", url, goto_exc
                 )
                 return None
 
-            html = page.content()
-            text = trafilatura.extract(html)
+            # Wait for any Cloudflare challenge to resolve before reading content.
+            deadline = time.time() + _CLOAK_CHALLENGE_WAIT_S
+            html = ""
+            while time.time() < deadline:
+                try:
+                    page.wait_for_load_state("networkidle", timeout=4000)
+                except Exception:  # noqa: BLE001
+                    pass
+                html = _cloak_safe_content(page)
+                low = html.lower()
+                if html and not any(m in low for m in _CLOAK_CHALLENGE_MARKERS):
+                    break
+                time.sleep(1.5)
+
+            # One final read to grab the freshest content after the loop.
+            html = _cloak_safe_content(page)
+
+            text = trafilatura.extract(html, favor_recall=True)
             if not text:
                 logger.warning(
                     "CloakBrowser fallback: extraction returned nothing for %s", url
