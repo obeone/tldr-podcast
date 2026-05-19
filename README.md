@@ -9,7 +9,7 @@
 ![uv](https://img.shields.io/badge/built%20with-uv-DE5FE9?logo=uv&logoColor=white)
 ![Gemini](https://img.shields.io/badge/Gemini-Flash%20%7C%20TTS-4285F4?logo=googlegemini&logoColor=white)
 ![ffmpeg](https://img.shields.io/badge/ffmpeg-required-007808?logo=ffmpeg&logoColor=white)
-![Version](https://img.shields.io/badge/version-1.6.1-blue)
+![Version](https://img.shields.io/badge/version-1.7.0-blue)
 
 Fetches any combination of [TLDR](https://tldr.tech) topic newsletters,
 LLM-scores the articles, and generates a scripted dialogue + audio via
@@ -22,7 +22,6 @@ Gemini AI. **No email account, no subscription, no API beyond Gemini.**
 ## 📑 Table of Contents
 
 - [✨ Features](#features)
-- [🧭 Pipeline](#pipeline)
 - [📦 Installation](#installation)
 - [🚀 Quick start](#quick-start)
 - [📰 Topics](#topics)
@@ -30,6 +29,7 @@ Gemini AI. **No email account, no subscription, no API beyond Gemini.**
 - [🖥️ CLI reference](#cli-reference)
 - [🐚 Shell completions](#shell-completions)
 - [🧪 Tests](#tests)
+- [🧭 Pipeline](#pipeline)
 - [🏷️ Releasing](#releasing)
 - [🗂️ Project structure](#project-structure)
 - [📜 Changelog](#changelog)
@@ -47,48 +47,11 @@ Gemini AI. **No email account, no subscription, no API beyond Gemini.**
 | 🗣️ | **Two-voice dialogue** | Configurable speaker names, Gemini voices, personalities, and language |
 | 🎭 | **Expressive delivery** | Inline audio tags (`[laughs]`, `[short pause]`, `[enthusiasm]`) on Gemini 3.x TTS; graceful fallback on older models |
 | 🗂️ | **Per-run reports** | Overview, full article list, script, and extracted links (repos · papers · models) |
+| 🕵️ | **Stealth browser fallback** | Optional CloakBrowser (Playwright stealth Chromium) re-renders pages that block trafilatura |
 | 🔁 | **Self-upgrading config** | Versioned schema; missing keys are added in place, old file kept as `.bak` |
 | 💸 | **Cost tracking** | Live token usage and a USD estimate at the end of every run |
 | 🔇 | **Dry & no-audio modes** | Preview the script without ever calling TTS |
 | 🎚️ | **Flexible output** | MP3 or WAV, custom output directory |
-
----
-
-<a id="pipeline"></a>
-
-## 🧭 Pipeline
-
-```mermaid
-flowchart TB
-    IN["🌐 tldr.tech/&lt;topic&gt;/&lt;date&gt;"]
-
-    subgraph SRC["① Source"]
-        WEB["Web Source<br/>BeautifulSoup · sponsor filter · dedup"]
-    end
-
-    subgraph CUR["② Curation"]
-        RANK["Interest Ranking<br/>LLM scores 1–10"]
-        WS["Web Scraper<br/>trafilatura full-text"]
-    end
-
-    subgraph GEN["③ Generation"]
-        LLM["Script Writer<br/>Gemini Flash"]
-        DC["Dialogue chunks<br/>≤ 3 000 bytes"]
-        TTS["TTS Generator<br/>Gemini multi-speaker"]
-    end
-
-    subgraph OUT["④ Output"]
-        AE["Audio Exporter<br/>pydub + ffmpeg"]
-        RPT["📊 Report Generator"]
-    end
-
-    IN --> WEB --> RANK --> WS
-    WS --> LE["Link Extractor<br/>repos · models · papers"]
-    WS --> LLM --> DC
-    DC --> TTS --> AE --> MP3["🎙️ .mp3 / .wav"]
-    DC --> RPT
-    LE --> RPT --> FILES["📂 overview · articles · script · links"]
-```
 
 ---
 
@@ -136,6 +99,33 @@ uv tool install .                 # install as a CLI tool
 # or, for development:
 uv sync && uv pip install -e .    # editable install
 ```
+
+</details>
+
+<details>
+<summary><b>Optional — stealth browser fallback (CloakBrowser)</b></summary>
+
+The optional `cloak` extra adds a Playwright-based stealth Chromium
+([CloakBrowser](https://pypi.org/project/cloakbrowser/)) that re-renders pages
+which block trafilatura; the ~200 MB browser binary downloads automatically at
+first runtime use (not at install time).
+
+```bash
+# uv tool — from GitHub
+uv tool install "tldr-podcast[cloak] @ git+https://github.com/obeone/tldr-podcast"
+
+# pipx — from GitHub
+pipx install "tldr-podcast[cloak] @ git+https://github.com/obeone/tldr-podcast"
+
+# pip (inside an active venv) — from GitHub
+pip install "tldr-podcast[cloak] @ git+https://github.com/obeone/tldr-podcast"
+
+# from a local clone
+uv tool install ".[cloak]"          # as a CLI tool
+uv sync --extra cloak               # for development
+```
+
+Already installed without it? Re-run the matching command above with the `[cloak]` extra to add the fallback.
 
 </details>
 
@@ -220,6 +210,38 @@ output:
 For fine-grained tuning (TTS pace, dialogue style, service tiers,
 per-model pricing…), every key is documented inline in
 [`config.example.yaml`](config.example.yaml).
+
+### Stealth browser fallback (optional)
+
+When trafilatura fails to fetch or extract an article (bot-detection,
+JS-rendered pages, etc.), the scraper can fall back to
+[CloakBrowser](https://pypi.org/project/cloakbrowser/) — a Playwright-based
+stealth Chromium that bypasses most bot-detection measures.
+
+Install the optional `cloak` extra — see [Installation](#installation).
+
+**Config key** (`scraping.cloak_fallback`):
+
+| Value | Behaviour |
+| --- | --- |
+| `auto` *(default)* | Use the fallback when the `cloakbrowser` package is importable |
+| `on` | Require the fallback; warns and degrades to newsletter summaries if not installed |
+| `off` | Never use the browser fallback |
+
+```yaml
+scraping:
+  cloak_fallback: auto   # auto | on | off
+```
+
+After navigation, the fallback automatically waits up to 35 seconds for
+any Cloudflare Turnstile challenge to resolve before reading the page.
+
+At most 2 stealth-browser sessions run concurrently to avoid memory
+exhaustion; trafilatura workers are unaffected.
+
+> **Known limitation:** heavily fortified sites using enterprise bot
+> management (e.g. g2.com) may still be blocked — the fallback handles
+> standard Cloudflare challenges, not every anti-bot system.
 
 ```bash
 tldr-podcast config show              # raw config
@@ -309,6 +331,44 @@ page in `tests/fixtures/` drives realistic parse validation.
 
 ---
 
+<a id="pipeline"></a>
+
+## 🧭 Pipeline
+
+```mermaid
+flowchart TB
+    IN["🌐 tldr.tech/&lt;topic&gt;/&lt;date&gt;"]
+
+    subgraph SRC["① Source"]
+        WEB["Web Source<br/>BeautifulSoup · sponsor filter · dedup"]
+    end
+
+    subgraph CUR["② Curation"]
+        RANK["Interest Ranking<br/>LLM scores 1–10"]
+        WS["Web Scraper<br/>trafilatura full-text"]
+    end
+
+    subgraph GEN["③ Generation"]
+        LLM["Script Writer<br/>Gemini Flash"]
+        DC["Dialogue chunks<br/>≤ 3 000 bytes"]
+        TTS["TTS Generator<br/>Gemini multi-speaker"]
+    end
+
+    subgraph OUT["④ Output"]
+        AE["Audio Exporter<br/>pydub + ffmpeg"]
+        RPT["📊 Report Generator"]
+    end
+
+    IN --> WEB --> RANK --> WS
+    WS --> LE["Link Extractor<br/>repos · models · papers"]
+    WS --> LLM --> DC
+    DC --> TTS --> AE --> MP3["🎙️ .mp3 / .wav"]
+    DC --> RPT
+    LE --> RPT --> FILES["📂 overview · articles · script · links"]
+```
+
+---
+
 <a id="releasing"></a>
 
 ## 🏷️ Releasing
@@ -367,6 +427,7 @@ tldr-podcast/
 
 | Version | Highlights |
 | --- | --- |
+| **1.7.0** | Optional CloakBrowser stealth-browser fallback (`scraping.cloak_fallback: auto\|on\|off`); config schema v4 |
 | **1.6.x** | Dependency security bumps; `trafilatura` 2.0 scraper user-agent fix |
 | **1.5.0** | `--version` flag on the top-level group |
 | **1.4.0** | Audio-tag support for Gemini 3.x Flash TTS; versioned config schema (`config_version`) with in-place auto-upgrade + backup |

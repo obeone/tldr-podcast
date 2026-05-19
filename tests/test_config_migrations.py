@@ -131,3 +131,51 @@ class TestUpgradeConfigIfNeeded:
 
         upgraded = upgrade_config_if_needed(dict(raw), cfg_path)
         assert upgraded["config_version"] == CURRENT_CONFIG_VERSION + 5
+
+    def test_v3_config_gets_cloak_fallback_auto(self, tmp_path: Path) -> None:
+        """A v3 config is upgraded with scraping.cloak_fallback='auto'."""
+        cfg_path = tmp_path / "config.yaml"
+        raw = {
+            "config_version": 3,
+            "web": {"user_agent": _BROWSER_USER_AGENT},
+            "gemini": {"tts_style": {"audio_tags": "auto"}},
+            "scraping": {"max_articles": 15, "timeout_seconds": 10},
+        }
+        _write_yaml(cfg_path, raw)
+
+        upgraded = upgrade_config_if_needed(dict(raw), cfg_path)
+
+        assert upgraded["config_version"] == CURRENT_CONFIG_VERSION
+        assert upgraded["scraping"]["cloak_fallback"] == "auto"
+
+    def test_v3_config_preserves_user_set_cloak_fallback(self, tmp_path: Path) -> None:
+        """A v3 config with a user-set cloak_fallback value is preserved (setdefault semantics)."""
+        cfg_path = tmp_path / "config.yaml"
+        raw = {
+            "config_version": 3,
+            "web": {"user_agent": _BROWSER_USER_AGENT},
+            "gemini": {"tts_style": {"audio_tags": "auto"}},
+            "scraping": {"max_articles": 15, "timeout_seconds": 10, "cloak_fallback": "off"},
+        }
+        _write_yaml(cfg_path, raw)
+
+        upgraded = upgrade_config_if_needed(dict(raw), cfg_path)
+
+        assert upgraded["config_version"] == CURRENT_CONFIG_VERSION
+        assert upgraded["scraping"]["cloak_fallback"] == "off"
+
+    def test_v1_upgrade_applies_all_migrations_including_v4(self, tmp_path: Path) -> None:
+        """A full v1→v4 chain produces all expected keys."""
+        cfg_path = tmp_path / "config.yaml"
+        raw = {
+            "web": {"user_agent": "tldr-podcast/1.0"},
+            "gemini": {"tts_model": "gemini-2.5-flash-preview-tts"},
+        }
+        _write_yaml(cfg_path, raw)
+
+        upgraded = upgrade_config_if_needed(dict(raw), cfg_path)
+
+        assert upgraded["config_version"] == CURRENT_CONFIG_VERSION
+        assert upgraded["web"]["user_agent"] == _BROWSER_USER_AGENT
+        assert upgraded["gemini"]["tts_style"]["audio_tags"] == "auto"
+        assert upgraded["scraping"]["cloak_fallback"] == "auto"

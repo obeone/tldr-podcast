@@ -31,7 +31,7 @@ from tldr.user_agent import BROWSER_USER_AGENT
 logger = logging.getLogger(__name__)
 
 # Current schema version.  Bump this whenever you add a migration below.
-CURRENT_CONFIG_VERSION: int = 3
+CURRENT_CONFIG_VERSION: int = 4
 
 _OLD_DEFAULT_USER_AGENT = "tldr-podcast/1.0"
 
@@ -84,9 +84,33 @@ def _migrate_2_to_3(raw: dict[str, Any]) -> dict[str, Any]:
     return raw
 
 
+def _migrate_3_to_4(raw: dict[str, Any]) -> dict[str, Any]:
+    """
+    Add ``scraping.cloak_fallback: auto`` for CloakBrowser stealth-browser support.
+
+    The flag controls whether the CloakBrowser stealth-Chromium fallback is
+    used when trafilatura fails to fetch or extract an article.  ``"auto"``
+    keeps backward-compatible behaviour: the fallback is enabled only when
+    the ``cloakbrowser`` package is importable.
+
+    Parameters
+    ----------
+    raw : dict
+        The raw config dict at schema version 3.
+
+    Returns
+    -------
+    dict
+        Config dict upgraded to schema version 4.
+    """
+    raw.setdefault("scraping", {}).setdefault("cloak_fallback", "auto")
+    return raw
+
+
 MIGRATIONS: list[tuple[int, Callable[[dict[str, Any]], dict[str, Any]]]] = [
     (1, _migrate_1_to_2),
     (2, _migrate_2_to_3),
+    (3, _migrate_3_to_4),
 ]
 
 # Enforce a contiguous migration chain from v1 to CURRENT_CONFIG_VERSION.
