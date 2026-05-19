@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 import struct
 from pathlib import Path
 
@@ -34,6 +35,7 @@ def _make_pcm(duration_ms: int = 100) -> bytes:
 class TestExportAudio:
     """export_audio must write valid audio files in various formats."""
 
+    @pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
     def test_creates_mp3_file_of_nonzero_size(self, tmp_path: Path) -> None:
         pcm = _make_pcm(200)
         out = tmp_path / "episode.mp3"
@@ -48,6 +50,7 @@ class TestExportAudio:
         assert result.exists()
         assert result.stat().st_size > 0
 
+    @pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
     def test_creates_parent_directories_automatically(self, tmp_path: Path) -> None:
         pcm = _make_pcm(100)
         out = tmp_path / "deep" / "nested" / "dir" / "episode.mp3"

@@ -9,7 +9,7 @@
 ![uv](https://img.shields.io/badge/built%20with-uv-DE5FE9?logo=uv&logoColor=white)
 ![Gemini](https://img.shields.io/badge/Gemini-Flash%20%7C%20TTS-4285F4?logo=googlegemini&logoColor=white)
 ![ffmpeg](https://img.shields.io/badge/ffmpeg-required-007808?logo=ffmpeg&logoColor=white)
-![Version](https://img.shields.io/badge/version-1.7.0-blue)
+![Version](https://img.shields.io/badge/version-1.7.1-blue)
 
 Fetches any combination of [TLDR](https://tldr.tech) topic newsletters,
 LLM-scores the articles, and generates a scripted dialogue + audio via
@@ -427,6 +427,7 @@ tldr-podcast/
 
 | Version | Highlights |
 | --- | --- |
+| **1.7.1** | CI: install ffmpeg in the release test gate; skip ffmpeg-dependent audio-exporter tests when ffmpeg is absent |
 | **1.7.0** | Optional CloakBrowser stealth-browser fallback (`scraping.cloak_fallback: auto\|on\|off`); config schema v4 |
 | **1.6.x** | Dependency security bumps; `trafilatura` 2.0 scraper user-agent fix |
 | **1.5.0** | `--version` flag on the top-level group |
