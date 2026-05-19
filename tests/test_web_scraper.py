@@ -7,8 +7,9 @@ Verifies article scraping behaviour with mocked trafilatura calls.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from unittest.mock import patch
+from unittest.mock import create_autospec, patch
 
+import trafilatura
 
 from tldr.web_scraper import scrape_article, scrape_articles
 
@@ -49,11 +50,11 @@ class TestScrapeArticle:
             result = scrape_article("https://example.com/article")
 
         assert result == "Article body text"
-        mock_fetch.assert_called_once_with(
-            "https://example.com/article",
-            no_ssl=True,
-            headers={"User-Agent": _BROWSER_USER_AGENT},
-        )
+        args, kwargs = mock_fetch.call_args
+        assert args == ("https://example.com/article",)
+        assert kwargs["no_ssl"] is True
+        assert "headers" not in kwargs
+        assert kwargs["config"].get("DEFAULT", "USER_AGENTS") == _BROWSER_USER_AGENT
         mock_extract.assert_called_once_with("<html>")
 
     def test_fetch_url_uses_browser_user_agent_by_default(self) -> None:
@@ -64,11 +65,11 @@ class TestScrapeArticle:
         ):
             scrape_article("https://example.com/article")
 
-        mock_fetch.assert_called_once_with(
-            "https://example.com/article",
-            no_ssl=True,
-            headers={"User-Agent": _BROWSER_USER_AGENT},
-        )
+        args, kwargs = mock_fetch.call_args
+        assert args == ("https://example.com/article",)
+        assert kwargs["no_ssl"] is True
+        assert "headers" not in kwargs
+        assert kwargs["config"].get("DEFAULT", "USER_AGENTS") == _BROWSER_USER_AGENT
 
     def test_returns_none_when_fetch_url_returns_none(self) -> None:
         """scrape_article returns None when trafilatura.fetch_url returns None."""
@@ -158,3 +159,45 @@ class TestScrapeArticles:
         assert articles[2].full_text == ""
         assert articles[3].full_text == ""
         assert articles[4].full_text == ""
+
+
+class TestScrapeArticleTrafilaturaApi:
+    """Regression tests pinning the call to the real trafilatura API.
+
+    These would fail against the old code that passed an unsupported
+    ``headers=`` kwarg to ``trafilatura.fetch_url``.
+    """
+
+    def test_fetch_url_called_with_supported_signature(self) -> None:
+        """scrape_article must only pass kwargs the installed
+        trafilatura.fetch_url actually accepts (autospec enforces the
+        real signature, so a stray ``headers`` kwarg raises TypeError)."""
+        autospec_fetch = create_autospec(trafilatura.fetch_url, return_value="<html>")
+        with (
+            patch("tldr.web_scraper.trafilatura.fetch_url", autospec_fetch),
+            patch("tldr.web_scraper.trafilatura.extract", return_value="Body"),
+        ):
+            result = scrape_article("https://example.com/a")
+
+        assert result == "Body"
+        _, kwargs = autospec_fetch.call_args
+        assert "headers" not in kwargs
+
+    def test_user_agent_and_timeout_passed_via_config(self) -> None:
+        """The configured UA and timeout reach trafilatura through the
+        config object (USER_AGENTS / DOWNLOAD_TIMEOUT)."""
+        captured: dict[str, str] = {}
+
+        def fake_fetch(url, no_ssl=False, config=None, options=None):
+            captured["ua"] = config.get("DEFAULT", "USER_AGENTS")
+            captured["timeout"] = config.get("DEFAULT", "DOWNLOAD_TIMEOUT")
+            return "<html>"
+
+        with (
+            patch("tldr.web_scraper.trafilatura.fetch_url", side_effect=fake_fetch),
+            patch("tldr.web_scraper.trafilatura.extract", return_value="Body"),
+        ):
+            scrape_article("https://example.com/a", timeout=42, user_agent="custom/9")
+
+        assert captured["ua"] == "custom/9"
+        assert captured["timeout"] == "42"
