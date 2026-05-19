@@ -1,0 +1,118 @@
+name: Publish
+
+# Triggered only when pyproject.toml changes on main. The `detect` job then
+# confirms the `project.version` value actually changed versus the parent
+# commit (a plain dependency bump must not trigger a release) and skips when
+# the matching tag already exists, so re-runs and unrelated edits are no-ops.
+# On a genuine bump: tests gate the release, the package is built and pushed
+# to PyPI via Trusted Publishing (OIDC, no stored secret), then a GitHub
+# release is cut for the new version.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - pyproject.toml
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  detect:
+    name: Detect version bump
+    runs-on: ubuntu-latest
+    outputs:
+      bumped: ${{ steps.check.outputs.bumped }}
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - id: check
+        shell: bash
+        run: |
+          set -euo pipefail
+          read_version() {
+            python3 -c 'import sys, tomllib; print(tomllib.load(open(sys.argv[1], "rb"))["project"]["version"])' "$1"
+          }
+          new="$(read_version pyproject.toml)"
+          if git show "HEAD~1:pyproject.toml" > /tmp/prev_pyproject.toml 2>/dev/null; then
+            old="$(read_version /tmp/prev_pyproject.toml 2>/dev/null || echo none)"
+          else
+            old="none"
+          fi
+          echo "Previous version: $old — current version: $new"
+          echo "version=$new" >> "$GITHUB_OUTPUT"
+          if [ "$new" = "$old" ]; then
+            echo "Version unchanged — nothing to publish."
+            echo "bumped=false" >> "$GITHUB_OUTPUT"
+          elif git ls-remote --exit-code --tags origin "refs/tags/v$new" >/dev/null 2>&1; then
+            echo "Tag v$new already exists on origin — already released, skipping."
+            echo "bumped=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Version bumped $old -> $new — release pipeline will run."
+            echo "bumped=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  test:
+    name: Tests
+    needs: detect
+    if: needs.detect.outputs.bumped == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.13"
+      - run: uv sync --frozen
+      - run: uv run pytest tests/ -q
+
+  publish:
+    name: Build & publish to PyPI
+    needs: [detect, test]
+    if: needs.detect.outputs.bumped == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/tldr-podcast
+    permissions:
+      id-token: write   # required for PyPI Trusted Publishing (OIDC)
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.13"
+      - name: Build sdist and wheel
+        run: uv build
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
+
+  release:
+    name: GitHub release
+    needs: [detect, publish]
+    if: needs.detect.outputs.bumped == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # required to create the tag and release
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.detect.outputs.version }}
+        run: |
+          set -euo pipefail
+          if gh release view "v$VERSION" >/dev/null 2>&1; then
+            echo "Release v$VERSION already exists — skipping."
+            exit 0
+          fi
+          gh release create "v$VERSION" \
+            --target "$GITHUB_SHA" \
+            --title "v$VERSION" \
+            --generate-notes
