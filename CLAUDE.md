@@ -54,7 +54,7 @@ tldr-podcast completions fish > ~/.config/fish/completions/tldr-podcast.fish
 
 Pipeline (left to right):
 
-```
+```text
 web_source (topics, date) → interest_ranking → web_scraper → llm_dialogue → tts_generator → audio_exporter → MP3
 ```
 
@@ -64,7 +64,7 @@ web_source (topics, date) → interest_ranking → web_scraper → llm_dialogue 
 - `config_migrations.py` — Versioned schema upgrade system. Bump `CURRENT_CONFIG_VERSION` and append a `(from_version, migrate_fn)` tuple to `MIGRATIONS` whenever new keys must be added to existing configs.
 - `models.py` — Shared dataclasses (`Article`) consumed by every pipeline stage.
 - `web_source.py` — Fetches `https://tldr.tech/<topic>/<YYYY-MM-DD>` for each requested topic, parses the HTML with BeautifulSoup, skips redirected URLs silently (no edition for that date), dedupes articles across topics, and filters sponsor/promo sections. Returns `list[Article]`.
-- `web_scraper.py` — Fetches full article text via trafilatura; falls back to the newsletter summary if scraping fails. Populates `Article.full_text`.
+- `web_scraper.py` — Fetches full article text via trafilatura; falls back to the newsletter summary if scraping fails. Populates `Article.full_text`. When the optional `cloakbrowser` package is installed and `scraping.cloak_fallback` is not `off`, articles that trafilatura cannot fetch or extract are re-rendered by a stealth Chromium browser (CloakBrowser) before falling back to the summary. At most 2 concurrent browser sessions run at once.
 - `llm_summarizer.py` — Two-stage LLM module: (1) `rank_articles_by_interest()` scores articles 1–10 by title+summary to select the most interesting before scraping; (2) `generate_dialogue()` produces a two-host dialogue script from full article text, split into `DialogueChunk` objects bounded to ≤3000 UTF-8 bytes each. The prompt instructs the LLM to insert inline delivery cues where pertinent — either English bracketed audio tags (`[laughs]`, `[short pause]`, `[enthusiasm]`, …) when `tts_model` supports them, or French parenthetical cues otherwise. Auto-detection keys on `tts_model` starting with `gemini-3`; override via `gemini.tts_style.audio_tags: auto|on|off`.
 - `tts_generator.py` — Calls Gemini multi-speaker TTS for each `DialogueChunk`; returns raw PCM bytes (24 kHz, mono, 16-bit LE).
 - `audio_exporter.py` — Concatenates PCM chunks and encodes to MP3 or WAV via pydub + ffmpeg.
@@ -89,6 +89,12 @@ Output filename is `<topic1>-<topic2>-…-<YYYY-MM-DD>.<fmt>` (topics sorted alp
 Default config path is `$XDG_CONFIG_HOME/tldr/config.yaml` (falls back to `~/.config/tldr/config.yaml`). Run `tldr-podcast config init` to create it interactively. Secrets are never stored directly — use `_env`-suffixed keys that reference environment variable names. Required env var: `GEMINI_API_KEY`.
 
 The file carries a top-level `config_version` key. When a new build adds keys, `load_config()` applies the migration chain from `config_migrations.py` in place and backs up the old file to `<name>.v<old>.bak`. Inline YAML comments are dropped on upgrade — edit the freshly written file afterwards if you had notes to preserve.
+
+Key scraping config keys:
+
+- `scraping.max_articles` — maximum articles to scrape (default: 15)
+- `scraping.timeout_seconds` — HTTP timeout in seconds (default: 10)
+- `scraping.cloak_fallback` — CloakBrowser stealth-browser fallback: `auto` (default, use when installed), `on` (require), `off` (disable)
 
 ## Testing
 
@@ -115,3 +121,5 @@ Every feature, fix, or behavioural change **must** bump the version in `pyprojec
 ## Dependencies
 
 Requires `ffmpeg` installed on the system for MP3 encoding (not a Python package).
+
+Optional: `cloakbrowser` (install with `pip install "tldr-podcast[cloak]"`) — Playwright-based stealth Chromium for the scraper browser fallback. Downloads a ~200 MB Chromium binary at first runtime use (not at install time).

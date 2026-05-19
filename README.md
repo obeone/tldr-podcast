@@ -9,7 +9,7 @@
 ![uv](https://img.shields.io/badge/built%20with-uv-DE5FE9?logo=uv&logoColor=white)
 ![Gemini](https://img.shields.io/badge/Gemini-Flash%20%7C%20TTS-4285F4?logo=googlegemini&logoColor=white)
 ![ffmpeg](https://img.shields.io/badge/ffmpeg-required-007808?logo=ffmpeg&logoColor=white)
-![Version](https://img.shields.io/badge/version-1.6.1-blue)
+![Version](https://img.shields.io/badge/version-1.7.0-blue)
 
 Fetches any combination of [TLDR](https://tldr.tech) topic newsletters,
 LLM-scores the articles, and generates a scripted dialogue + audio via
@@ -47,6 +47,7 @@ Gemini AI. **No email account, no subscription, no API beyond Gemini.**
 | 🗣️ | **Two-voice dialogue** | Configurable speaker names, Gemini voices, personalities, and language |
 | 🎭 | **Expressive delivery** | Inline audio tags (`[laughs]`, `[short pause]`, `[enthusiasm]`) on Gemini 3.x TTS; graceful fallback on older models |
 | 🗂️ | **Per-run reports** | Overview, full article list, script, and extracted links (repos · papers · models) |
+| 🕵️ | **Stealth browser fallback** | Optional CloakBrowser (Playwright stealth Chromium) re-renders pages that block trafilatura |
 | 🔁 | **Self-upgrading config** | Versioned schema; missing keys are added in place, old file kept as `.bak` |
 | 💸 | **Cost tracking** | Live token usage and a USD estimate at the end of every run |
 | 🔇 | **Dry & no-audio modes** | Preview the script without ever calling TTS |
@@ -221,6 +222,42 @@ For fine-grained tuning (TTS pace, dialogue style, service tiers,
 per-model pricing…), every key is documented inline in
 [`config.example.yaml`](config.example.yaml).
 
+### Stealth browser fallback (optional)
+
+When trafilatura fails to fetch or extract an article (bot-detection,
+JS-rendered pages, etc.), the scraper can fall back to
+[CloakBrowser](https://pypi.org/project/cloakbrowser/) — a Playwright-based
+stealth Chromium that bypasses most bot-detection measures.
+
+The browser binary (~200 MB) is downloaded automatically at **first runtime
+use**, not at install time.
+
+**Install the optional extra:**
+
+```bash
+# uv
+uv tool install ".[cloak]"
+
+# pip / pipx
+pip install "tldr-podcast[cloak]"
+```
+
+**Config key** (`scraping.cloak_fallback`):
+
+| Value | Behaviour |
+| --- | --- |
+| `auto` *(default)* | Use the fallback when the `cloakbrowser` package is importable |
+| `on` | Require the fallback; warns and degrades to newsletter summaries if not installed |
+| `off` | Never use the browser fallback |
+
+```yaml
+scraping:
+  cloak_fallback: auto   # auto | on | off
+```
+
+At most 2 stealth-browser sessions run concurrently to avoid memory
+exhaustion; trafilatura workers are unaffected.
+
 ```bash
 tldr-podcast config show              # raw config
 tldr-podcast config show --resolve    # env vars resolved, secrets masked
@@ -367,6 +404,7 @@ tldr-podcast/
 
 | Version | Highlights |
 | --- | --- |
+| **1.7.0** | Optional CloakBrowser stealth-browser fallback (`scraping.cloak_fallback: auto\|on\|off`); config schema v4 |
 | **1.6.x** | Dependency security bumps; `trafilatura` 2.0 scraper user-agent fix |
 | **1.5.0** | `--version` flag on the top-level group |
 | **1.4.0** | Audio-tag support for Gemini 3.x Flash TTS; versioned config schema (`config_version`) with in-place auto-upgrade + backup |
