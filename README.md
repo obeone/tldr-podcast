@@ -255,8 +255,15 @@ scraping:
   cloak_fallback: auto   # auto | on | off
 ```
 
+After navigation, the fallback automatically waits up to 35 seconds for
+any Cloudflare Turnstile challenge to resolve before reading the page.
+
 At most 2 stealth-browser sessions run concurrently to avoid memory
 exhaustion; trafilatura workers are unaffected.
+
+> **Known limitation:** heavily fortified sites using enterprise bot
+> management (e.g. g2.com) may still be blocked — the fallback handles
+> standard Cloudflare challenges, not every anti-bot system.
 
 ```bash
 tldr-podcast config show              # raw config
