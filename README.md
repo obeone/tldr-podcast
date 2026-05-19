@@ -22,7 +22,6 @@ Gemini AI. **No email account, no subscription, no API beyond Gemini.**
 ## 📑 Table of Contents
 
 - [✨ Features](#features)
-- [🧭 Pipeline](#pipeline)
 - [📦 Installation](#installation)
 - [🚀 Quick start](#quick-start)
 - [📰 Topics](#topics)
@@ -30,6 +29,7 @@ Gemini AI. **No email account, no subscription, no API beyond Gemini.**
 - [🖥️ CLI reference](#cli-reference)
 - [🐚 Shell completions](#shell-completions)
 - [🧪 Tests](#tests)
+- [🧭 Pipeline](#pipeline)
 - [🏷️ Releasing](#releasing)
 - [🗂️ Project structure](#project-structure)
 - [📜 Changelog](#changelog)
@@ -52,44 +52,6 @@ Gemini AI. **No email account, no subscription, no API beyond Gemini.**
 | 💸 | **Cost tracking** | Live token usage and a USD estimate at the end of every run |
 | 🔇 | **Dry & no-audio modes** | Preview the script without ever calling TTS |
 | 🎚️ | **Flexible output** | MP3 or WAV, custom output directory |
-
----
-
-<a id="pipeline"></a>
-
-## 🧭 Pipeline
-
-```mermaid
-flowchart TB
-    IN["🌐 tldr.tech/&lt;topic&gt;/&lt;date&gt;"]
-
-    subgraph SRC["① Source"]
-        WEB["Web Source<br/>BeautifulSoup · sponsor filter · dedup"]
-    end
-
-    subgraph CUR["② Curation"]
-        RANK["Interest Ranking<br/>LLM scores 1–10"]
-        WS["Web Scraper<br/>trafilatura full-text"]
-    end
-
-    subgraph GEN["③ Generation"]
-        LLM["Script Writer<br/>Gemini Flash"]
-        DC["Dialogue chunks<br/>≤ 3 000 bytes"]
-        TTS["TTS Generator<br/>Gemini multi-speaker"]
-    end
-
-    subgraph OUT["④ Output"]
-        AE["Audio Exporter<br/>pydub + ffmpeg"]
-        RPT["📊 Report Generator"]
-    end
-
-    IN --> WEB --> RANK --> WS
-    WS --> LE["Link Extractor<br/>repos · models · papers"]
-    WS --> LLM --> DC
-    DC --> TTS --> AE --> MP3["🎙️ .mp3 / .wav"]
-    DC --> RPT
-    LE --> RPT --> FILES["📂 overview · articles · script · links"]
-```
 
 ---
 
@@ -137,6 +99,33 @@ uv tool install .                 # install as a CLI tool
 # or, for development:
 uv sync && uv pip install -e .    # editable install
 ```
+
+</details>
+
+<details>
+<summary><b>Optional — stealth browser fallback (CloakBrowser)</b></summary>
+
+The optional `cloak` extra adds a Playwright-based stealth Chromium
+([CloakBrowser](https://pypi.org/project/cloakbrowser/)) that re-renders pages
+which block trafilatura; the ~200 MB browser binary downloads automatically at
+first runtime use (not at install time).
+
+```bash
+# uv tool — from GitHub
+uv tool install "tldr-podcast[cloak] @ git+https://github.com/obeone/tldr-podcast"
+
+# pipx — from GitHub
+pipx install "tldr-podcast[cloak] @ git+https://github.com/obeone/tldr-podcast"
+
+# pip (inside an active venv) — from GitHub
+pip install "tldr-podcast[cloak] @ git+https://github.com/obeone/tldr-podcast"
+
+# from a local clone
+uv tool install ".[cloak]"          # as a CLI tool
+uv sync --extra cloak               # for development
+```
+
+Already installed without it? Re-run the matching command above with the `[cloak]` extra to add the fallback.
 
 </details>
 
@@ -229,18 +218,7 @@ JS-rendered pages, etc.), the scraper can fall back to
 [CloakBrowser](https://pypi.org/project/cloakbrowser/) — a Playwright-based
 stealth Chromium that bypasses most bot-detection measures.
 
-The browser binary (~200 MB) is downloaded automatically at **first runtime
-use**, not at install time.
-
-**Install the optional extra:**
-
-```bash
-# uv
-uv tool install ".[cloak]"
-
-# pip / pipx
-pip install "tldr-podcast[cloak]"
-```
+Install the optional `cloak` extra — see [Installation](#installation).
 
 **Config key** (`scraping.cloak_fallback`):
 
@@ -350,6 +328,44 @@ uv run pytest tests/ -v
 
 All external APIs (Gemini, HTTP) are mocked. A real captured TLDR HTML
 page in `tests/fixtures/` drives realistic parse validation.
+
+---
+
+<a id="pipeline"></a>
+
+## 🧭 Pipeline
+
+```mermaid
+flowchart TB
+    IN["🌐 tldr.tech/&lt;topic&gt;/&lt;date&gt;"]
+
+    subgraph SRC["① Source"]
+        WEB["Web Source<br/>BeautifulSoup · sponsor filter · dedup"]
+    end
+
+    subgraph CUR["② Curation"]
+        RANK["Interest Ranking<br/>LLM scores 1–10"]
+        WS["Web Scraper<br/>trafilatura full-text"]
+    end
+
+    subgraph GEN["③ Generation"]
+        LLM["Script Writer<br/>Gemini Flash"]
+        DC["Dialogue chunks<br/>≤ 3 000 bytes"]
+        TTS["TTS Generator<br/>Gemini multi-speaker"]
+    end
+
+    subgraph OUT["④ Output"]
+        AE["Audio Exporter<br/>pydub + ffmpeg"]
+        RPT["📊 Report Generator"]
+    end
+
+    IN --> WEB --> RANK --> WS
+    WS --> LE["Link Extractor<br/>repos · models · papers"]
+    WS --> LLM --> DC
+    DC --> TTS --> AE --> MP3["🎙️ .mp3 / .wav"]
+    DC --> RPT
+    LE --> RPT --> FILES["📂 overview · articles · script · links"]
+```
 
 ---
 
