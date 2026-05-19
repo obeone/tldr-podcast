@@ -9,7 +9,7 @@
 ![uv](https://img.shields.io/badge/built%20with-uv-DE5FE9?logo=uv&logoColor=white)
 ![Gemini](https://img.shields.io/badge/Gemini-Flash%20%7C%20TTS-4285F4?logo=googlegemini&logoColor=white)
 ![ffmpeg](https://img.shields.io/badge/ffmpeg-required-007808?logo=ffmpeg&logoColor=white)
-![Version](https://img.shields.io/badge/version-1.7.1-blue)
+![Version](https://img.shields.io/badge/version-1.7.2-blue)
 
 Fetches any combination of [TLDR](https://tldr.tech) topic newsletters,
 LLM-scores the articles, and generates a scripted dialogue + audio via
@@ -70,21 +70,24 @@ sudo apt-get install -y ffmpeg
 ```
 
 <details>
-<summary><b>From GitHub — no clone needed</b></summary>
+<summary><b>From PyPI — no clone needed</b></summary>
 
 ```bash
 # uv (recommended)
-uv tool install git+https://github.com/obeone/tldr-podcast
+uv tool install tldr-podcast
 
 # uvx — run once, install nothing permanently
-uvx --from git+https://github.com/obeone/tldr-podcast tldr-podcast run -t ai --no-interactive
+uvx tldr-podcast run -t ai --no-interactive
 
 # pipx
-pipx install git+https://github.com/obeone/tldr-podcast
+pipx install tldr-podcast
 
 # pip (inside an active venv)
-pip install git+https://github.com/obeone/tldr-podcast
+pip install tldr-podcast
 ```
+
+For the unreleased `main` instead of the latest PyPI release, replace
+`tldr-podcast` with `git+https://github.com/obeone/tldr-podcast`.
 
 </details>
 
@@ -111,14 +114,14 @@ which block trafilatura; the ~200 MB browser binary downloads automatically at
 first runtime use (not at install time).
 
 ```bash
-# uv tool — from GitHub
-uv tool install "tldr-podcast[cloak] @ git+https://github.com/obeone/tldr-podcast"
+# uv tool — from PyPI
+uv tool install "tldr-podcast[cloak]"
 
-# pipx — from GitHub
-pipx install "tldr-podcast[cloak] @ git+https://github.com/obeone/tldr-podcast"
+# pipx — from PyPI
+pipx install "tldr-podcast[cloak]"
 
-# pip (inside an active venv) — from GitHub
-pip install "tldr-podcast[cloak] @ git+https://github.com/obeone/tldr-podcast"
+# pip (inside an active venv) — from PyPI
+pip install "tldr-podcast[cloak]"
 
 # from a local clone
 uv tool install ".[cloak]"          # as a CLI tool
@@ -427,6 +430,7 @@ tldr-podcast/
 
 | Version | Highlights |
 | --- | --- |
+| **1.7.2** | PyPI project page (README long description, author, project URLs); install docs use PyPI instead of GitHub |
 | **1.7.1** | CI: install ffmpeg in the release test gate; skip ffmpeg-dependent audio-exporter tests when ffmpeg is absent |
 | **1.7.0** | Optional CloakBrowser stealth-browser fallback (`scraping.cloak_fallback: auto\|on\|off`); config schema v4 |
 | **1.6.x** | Dependency security bumps; `trafilatura` 2.0 scraper user-agent fix |

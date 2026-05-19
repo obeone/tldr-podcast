@@ -1,8 +1,12 @@
 [project]
 name = "tldr-podcast"
-version = "1.7.1"
+version = "1.7.2"
 description = "Converts TLDR newsletters to a two-voice podcast MP3 using Gemini"
+readme = "README.md"
 requires-python = ">=3.13"
+authors = [
+    { name = "Grégoire Compagnon", email = "obeone@obeone.org" },
+]
 dependencies = [
     "audioop-lts>=0.2.2",
     "beautifulsoup4>=4.14",
@@ -34,6 +38,11 @@ testpaths = ["tests"]
 
 [project.scripts]
 tldr-podcast = "tldr.cli:cli"
+
+[project.urls]
+Homepage = "https://github.com/obeone/tldr-podcast"
+Repository = "https://github.com/obeone/tldr-podcast"
+Issues = "https://github.com/obeone/tldr-podcast/issues"
 
 [build-system]
 requires = ["setuptools>=68"]
