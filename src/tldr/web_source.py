@@ -57,7 +57,7 @@ _DEFAULT_TIMEOUT_SECONDS = 15
 #: actually exist; a jittered delay spreads the requests out and avoids the
 #: false negatives.  Set both bounds to ``0`` (or pass ``delay_range=None``)
 #: to restore the old concurrent, no-delay behaviour.
-_DEFAULT_CHECK_DELAY_RANGE: tuple[float, float] = (1.0, 5.0)
+_DEFAULT_CHECK_DELAY_RANGE: tuple[float, float] = (1.0, 3.0)
 
 _SPONSOR_HEADER_PATTERNS = ("sponsor", "together with", "promotion")
 _SPONSOR_URL_MARKER = "utm_source=tldrnewsletter&utm_medium=sponsor"

@@ -19,7 +19,7 @@ web:
   # the requests out and removes those false negatives.
   # Set both bounds to 0 to disable (restores concurrent, no-delay probing).
   check_delay_min: 1.0
-  check_delay_max: 5.0
+  check_delay_max: 3.0
 
 gemini:
   # Name of the environment variable holding your Gemini API key
