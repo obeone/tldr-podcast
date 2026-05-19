@@ -194,8 +194,8 @@ config_version: 5
 
 web:
   default_topics: [ ai, infosec, devops ]
-  check_delay_min: 0.5   # randomised pause (s) between tldr.tech requests…
-  check_delay_max: 2.0   # …avoids rate-limit 404s; set both to 0 to disable
+  check_delay_min: 1.0   # randomised pause (s) between tldr.tech requests…
+  check_delay_max: 5.0   # …avoids rate-limit 404s; set both to 0 to disable
 
 gemini:
   api_key_env: GEMINI_API_KEY        # name of the env var — never the key itself
@@ -434,7 +434,7 @@ tldr-podcast/
 
 | Version | Highlights |
 | --- | --- |
-| **1.8.0** | Throttled tldr.tech requests: randomised inter-request delay (`web.check_delay_min`/`web.check_delay_max`, default 0.5–2.0 s) for the availability probe and newsletter fetch — fixes false `404`s from rate-limiting the topic burst; config schema v5 |
+| **1.8.0** | Throttled tldr.tech requests: randomised inter-request delay (`web.check_delay_min`/`web.check_delay_max`, default 1–5 s) for the availability probe and newsletter fetch — fixes false `404`s from rate-limiting the topic burst; config schema v5 |
 | **1.7.2** | MIT license; PyPI project page (README long description, author, project URLs); install docs use PyPI instead of GitHub |
 | **1.7.1** | CI: install ffmpeg in the release test gate; skip ffmpeg-dependent audio-exporter tests when ffmpeg is absent |
 | **1.7.0** | Optional CloakBrowser stealth-browser fallback (`scraping.cloak_fallback: auto\|on\|off`); config schema v4 |

@@ -179,8 +179,8 @@ class TestUpgradeConfigIfNeeded:
         assert upgraded["web"]["user_agent"] == _BROWSER_USER_AGENT
         assert upgraded["gemini"]["tts_style"]["audio_tags"] == "auto"
         assert upgraded["scraping"]["cloak_fallback"] == "auto"
-        assert upgraded["web"]["check_delay_min"] == 0.5
-        assert upgraded["web"]["check_delay_max"] == 2.0
+        assert upgraded["web"]["check_delay_min"] == 1.0
+        assert upgraded["web"]["check_delay_max"] == 5.0
 
     def test_v4_config_gets_check_delay_defaults(self, tmp_path: Path) -> None:
         """A v4 config is upgraded with web.check_delay_min/max defaults."""
@@ -196,8 +196,8 @@ class TestUpgradeConfigIfNeeded:
         upgraded = upgrade_config_if_needed(dict(raw), cfg_path)
 
         assert upgraded["config_version"] == CURRENT_CONFIG_VERSION
-        assert upgraded["web"]["check_delay_min"] == 0.5
-        assert upgraded["web"]["check_delay_max"] == 2.0
+        assert upgraded["web"]["check_delay_min"] == 1.0
+        assert upgraded["web"]["check_delay_max"] == 5.0
 
     def test_v4_config_preserves_user_set_check_delay(self, tmp_path: Path) -> None:
         """User-set check_delay bounds survive the v4→v5 migration."""

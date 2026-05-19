@@ -463,8 +463,8 @@ def run(
     # topics back-to-back makes tldr.tech rate-limit the burst and answer
     # 404 for editions that exist; the jitter spreads requests out.  Set
     # both bounds to 0 to disable (restores concurrent, no-delay probing).
-    check_delay_min: float = float(web_cfg.get("check_delay_min", 0.5))
-    check_delay_max: float = float(web_cfg.get("check_delay_max", 2.0))
+    check_delay_min: float = float(web_cfg.get("check_delay_min", 1.0))
+    check_delay_max: float = float(web_cfg.get("check_delay_max", 5.0))
     check_delay_range: tuple[float, float] = (check_delay_min, check_delay_max)
 
     service_tier: str | None = gemini_cfg.get("service_tier") or None
@@ -743,11 +743,11 @@ def config_init(output_path: str) -> None:
     )
     web_check_delay_min = _prompt(
         "Min delay between tldr.tech checks (seconds, 0 to disable)",
-        _get("web", "check_delay_min", "0.5"),
+        _get("web", "check_delay_min", "1.0"),
     )
     web_check_delay_max = _prompt(
         "Max delay between tldr.tech checks (seconds, 0 to disable)",
-        _get("web", "check_delay_max", "2.0"),
+        _get("web", "check_delay_max", "5.0"),
     )
 
     # ── Gemini ────────────────────────────────────────────────────────────

@@ -114,7 +114,7 @@ def _migrate_4_to_5(raw: dict[str, Any]) -> dict[str, Any]:
     Probing every tldr.tech topic back-to-back makes the site rate-limit
     the burst and answer ``404`` for editions that actually exist.  These
     keys bound the randomised pause (seconds) inserted between successive
-    requests.  The defaults (``0.5`` / ``2.0``) enable throttling; set both
+    requests.  The defaults (``1.0`` / ``5.0``) enable throttling; set both
     to ``0`` to restore the old concurrent, no-delay behaviour.  Existing
     user-set values are preserved via ``setdefault`` semantics.
 
@@ -129,8 +129,8 @@ def _migrate_4_to_5(raw: dict[str, Any]) -> dict[str, Any]:
         Config dict upgraded to schema version 5.
     """
     web = raw.setdefault("web", {})
-    web.setdefault("check_delay_min", 0.5)
-    web.setdefault("check_delay_max", 2.0)
+    web.setdefault("check_delay_min", 1.0)
+    web.setdefault("check_delay_max", 5.0)
     return raw
 
 
