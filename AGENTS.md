@@ -1,6 +1,137 @@
-# Repository Guidelines
+# AGENTS.md
 
-## Project Structure & Module Organization
+Canonical project instructions for coding agents. Maintain shared guidance here.
+
+## Project Overview
+
+`tldr-podcast` fetches TLDR newsletters directly from `tldr.tech` and converts them into two-voice podcast MP3 files using Google Gemini for both dialogue generation and TTS synthesis.
+
+## Commands
+
+```bash
+# Install as a tool
+uv tool install .
+
+# Run the full pipeline with an interactive topic picker (default: today)
+tldr-podcast run
+
+# Pick topics explicitly, skip the prompt
+tldr-podcast run --topics ai,devops --no-interactive
+
+# Target a specific date
+tldr-podcast run -d 2026-04-06
+
+# Dry-run (no TTS, prints the dialogue script)
+tldr-podcast run -t infosec --no-interactive --dry-run
+
+# Dev mode (editable install)
+uv sync && uv pip install -e .
+
+# Run tests
+uv run pytest tests/ -v
+
+# Run a single test file
+uv run pytest tests/test_web_source.py -v
+
+# Run a single test by name
+uv run pytest tests/test_web_source.py::TestFetchNewsletters::test_happy_path_parses_fixture -v
+
+# Run with coverage
+uv run pytest tests/ --cov=src/tldr
+
+# Generate shell completions (bash/zsh/fish) — write to file, do not eval
+mkdir -p ~/.local/share/bash-completion/completions
+tldr-podcast completions bash > ~/.local/share/bash-completion/completions/tldr-podcast
+
+mkdir -p ~/.zsh/completions
+tldr-podcast completions zsh > ~/.zsh/completions/_tldr-podcast
+# add to ~/.zshrc: fpath=(~/.zsh/completions $fpath); autoload -Uz compinit && compinit
+
+tldr-podcast completions fish > ~/.config/fish/completions/tldr-podcast.fish
+```
+
+## Architecture
+
+Pipeline (left to right):
+
+```text
+web_source (topics, date) → interest_ranking → web_scraper → llm_dialogue → tts_generator → audio_exporter → MP3
+```
+
+**`src/tldr/` modules:**
+
+- `config.py` — Loads `config.yaml` via `load_config()`. Keys ending in `_env` are replaced at runtime by the named environment variable value (e.g. `api_key_env: GEMINI_API_KEY` becomes `api_key: <value of $GEMINI_API_KEY>`). On load, an out-of-date file is auto-upgraded to `CURRENT_CONFIG_VERSION` (previous copy saved next to it as `<name>.v<old>.bak`).
+- `config_migrations.py` — Versioned schema upgrade system. Bump `CURRENT_CONFIG_VERSION` and append a `(from_version, migrate_fn)` tuple to `MIGRATIONS` whenever new keys must be added to existing configs.
+- `models.py` — Shared dataclasses (`Article`) consumed by every pipeline stage.
+- `web_source.py` — Fetches `https://tldr.tech/<topic>/<YYYY-MM-DD>` for each requested topic, parses the HTML with BeautifulSoup, skips redirected URLs silently (no edition for that date), dedupes articles across topics, and filters sponsor/promo sections. Returns `list[Article]`. Both the availability probe (`check_availability()`) and the newsletter fetch (`fetch_newsletters()`) probe topics **sequentially with a randomised inter-request delay** (`web.check_delay_min`/`web.check_delay_max`, default 1–3 s) so tldr.tech does not rate-limit a 13-topic burst and return false `404`s. Set both bounds to 0 (or pass `delay_range=None`) to restore the old concurrent, no-delay behaviour.
+- `web_scraper.py` — Fetches full article text via trafilatura; falls back to the newsletter summary if scraping fails. Populates `Article.full_text`. When the optional `cloakbrowser` package is installed and `scraping.cloak_fallback` is not `off`, articles that trafilatura cannot fetch or extract are re-rendered by a stealth Chromium browser (CloakBrowser, launched with `humanize=True`) before falling back to the summary. After navigation, the fallback waits up to 35 s for any Cloudflare Turnstile challenge to resolve. At most 2 concurrent browser sessions run at once. Known limitation: enterprise bot management (e.g. g2.com) may still block the fallback — it handles standard Cloudflare challenges only.
+- `llm_summarizer.py` — Two-stage LLM module: (1) `rank_articles_by_interest()` scores articles 1–10 by title+summary to select the most interesting before scraping; (2) `generate_dialogue()` produces a two-host dialogue script from full article text, split into `DialogueChunk` objects bounded to ≤3000 UTF-8 bytes each. The prompt instructs the LLM to insert inline delivery cues where pertinent — either English bracketed audio tags (`[laughs]`, `[short pause]`, `[enthusiasm]`, …) when `tts_model` supports them, or French parenthetical cues otherwise. Auto-detection keys on `tts_model` starting with `gemini-3`; override via `gemini.tts_style.audio_tags: auto|on|off`.
+- `tts_generator.py` — Calls Gemini multi-speaker TTS for each `DialogueChunk`; returns raw PCM bytes (24 kHz, mono, 16-bit LE).
+- `audio_exporter.py` — Concatenates PCM chunks and encodes to MP3 or WAV via pydub + ffmpeg.
+- `report_generator.py` — Writes `overview.md`, `articles.md`, `script.md`, `summary.md` in a folder named after the podcast stem.
+- `link_extractor.py`, `token_tracker.py`, `retry.py` — Supporting helpers.
+
+**`cli.py`** — Click CLI entry point (group with `run`, `config`, and `completions` subcommands); orchestrates the full pipeline. Installed as the `tldr-podcast` command via `[project.scripts]`. The top-level group exposes `--version` (reads version from package metadata, prints, and exits). All commands support `-h` for help. Short flags on `run`: `-c` config, `-t` topics, `-d` date, `-o` output-dir, `-n` dry-run, `-A` no-audio, `-v` verbose, `-r`/`-R` report/no-report. Report generation is enabled by default.
+
+Topic selection precedence: `--topics ai,devops` CLI arg > interactive `questionary.checkbox()` prompt (pre-checked from `web.default_topics`) > config `web.default_topics` (when `--no-interactive` is set).
+
+Supported topic slugs: `ai`, `infosec`, `tech`, `crypto`, `founders`, `dev`, `it`, `design`, `product`, `devops`, `marketing`, `data`, `fintech`.
+
+Output filename is `<topic1>-<topic2>-…-<YYYY-MM-DD>.<fmt>` (topics sorted alphabetically); the report folder uses the same stem. Output directory defaults to the current working directory, overridable by `--output-dir` and `output.dir` in the config.
+
+## Key Data Types
+
+- `Article` (dataclass in `models.py`): `title`, `summary`, `url`, `section`, `full_text`, `interest_score`
+- `DialogueChunk` (dataclass in `llm_summarizer.py`): `text`, `index`
+
+## Configuration
+
+Default config path is `$XDG_CONFIG_HOME/tldr/config.yaml` (falls back to `~/.config/tldr/config.yaml`). Run `tldr-podcast config init` to create it interactively. Secrets are never stored directly — use `_env`-suffixed keys that reference environment variable names. Required env var: `GEMINI_API_KEY`.
+
+The file carries a top-level `config_version` key. When a new build adds keys, `load_config()` applies the migration chain from `config_migrations.py` in place and backs up the old file to `<name>.v<old>.bak`. Inline YAML comments are dropped on upgrade — edit the freshly written file afterwards if you had notes to preserve.
+
+Key web config keys:
+
+- `web.timeout_seconds` — HTTP timeout in seconds for newsletter page fetches (default: 15)
+- `web.check_delay_min` / `web.check_delay_max` — bounds (seconds) of the randomised pause inserted between successive tldr.tech requests, for both the availability probe and the newsletter fetch (defaults: 1.0 / 3.0). Set both to 0 to disable and restore concurrent, no-delay probing.
+
+Key scraping config keys:
+
+- `scraping.max_articles` — maximum articles to scrape (default: 15)
+- `scraping.timeout_seconds` — HTTP timeout in seconds (default: 10)
+- `scraping.cloak_fallback` — CloakBrowser stealth-browser fallback: `auto` (default, use when installed), `on` (require), `off` (disable)
+
+## Testing
+
+All tests use mocks for external APIs (Gemini, HTTP). The TLDR HTML fixture under `tests/fixtures/` is a real captured page used by `test_web_source.py`. See `uv run pytest tests/ -q` for the current count.
+
+## Documentation
+
+Any new feature exposed to the user (new CLI flag, subcommand, config key, output format, or behaviour change) **must** be documented in the same commit that introduces it. Update whichever of the following are affected:
+
+- `README.md` — user-facing usage, flags, examples
+- `AGENTS.md` — architecture, CLI flags summary, config keys, key data types
+- Inline `--help` text in `cli.py`
+
+No feature lands without its docs. Docs-only fixes (typos, clarifications) do not require a version bump.
+
+## Versioning
+
+Every feature, fix, or behavioural change **must** bump the version in `pyproject.toml` before committing. Follow [SemVer](https://semver.org/):
+
+- **patch** (`1.0.0` → `1.0.1`): bug fixes, minor tweaks
+- **minor** (`1.0.0` → `1.1.0`): new features, prompt changes, new CLI options
+- **major** (`1.0.0` → `2.0.0`): breaking changes (config format, CLI interface, output format)
+
+## Dependencies
+
+Requires `ffmpeg` installed on the system for MP3 encoding (not a Python package).
+
+Optional: `cloakbrowser` (install with `pip install "tldr-podcast[cloak]"`) — Playwright-based stealth Chromium for the scraper browser fallback. Downloads a ~200 MB Chromium binary at first runtime use (not at install time).
+
+## Additional agent and contributor instructions
+
+### Project Structure & Module Organization
 
 Application code lives in `src/tldr/`. The main entry point is
 `src/tldr/cli.py`, with focused modules for config loading, scraping,
@@ -8,7 +139,7 @@ summarization, TTS, audio export, reporting, and retry logic. Tests live in
 `tests/`, with fixture HTML in `tests/fixtures/`. Project-level files include
 `pyproject.toml`, `uv.lock`, `README.md`, and `config.example.yaml`.
 
-## Build, Test, and Development Commands
+### Build, Test, and Development Commands
 
 Use `uv` for all local development.
 
@@ -21,7 +152,7 @@ Use `uv` for all local development.
 
 `ffmpeg` is required for audio export and should be installed separately.
 
-## Coding Style & Naming Conventions
+### Coding Style & Naming Conventions
 
 Target Python 3.13+ and keep type hints on all public signatures. Follow the
 existing module split: one responsibility per file, small focused functions,
@@ -29,7 +160,7 @@ and descriptive snake_case names for modules, functions, and variables.
 Classes use PascalCase. Keep imports tidy and prefer explicit dependencies over
 shared globals. Use `coloredlogs` for new logging paths.
 
-## Testing Guidelines
+### Testing Guidelines
 
 Tests use `pytest` with files named `test_<area>.py`. Add a regression test for
 every bug fix and cover the main happy path plus failure modes for new
@@ -37,7 +168,7 @@ features. Prefer realistic integration-style tests when behavior spans scraping,
 LLM orchestration, or reporting. Mock external APIs and network calls; the
 suite already relies on captured HTML fixtures instead of live services.
 
-## Commit & Pull Request Guidelines
+### Commit & Pull Request Guidelines
 
 Recent history follows Conventional Commits such as
 `feat(cli): add --version flag` and `chore(deps): sync uv.lock to 1.5.0`.
@@ -46,14 +177,14 @@ with the dependency change that requires them. PRs should state the user-facing
 change, note config or dependency impacts, and include command output for tests
 run locally. Every PR must include an appropriate project version bump.
 
-## Repository Hosting & GitHub Tools
+### Repository Hosting & GitHub Tools
 
 This repository is hosted on GitHub (`github.com/obeone/tldr-podcast`). The
 `origin` remote points there. Use the `gh` CLI for GitHub operations such as
 pull requests, issues, releases, tags, and workflows. Do not use Forgejo
 (`fj`) tooling for this repository.
 
-## Worktree Guidelines
+### Worktree Guidelines
 
 Use a dedicated worktree for large, risky, or multi-file changes. Small,
 targeted edits such as documentation updates, configuration tweaks, or single
@@ -65,7 +196,7 @@ exists, inspect it and coordinate before editing. The lockfile should include
 the agent name or session identifier, the branch name, the intended change, and
 the start time.
 
-## Configuration & Security Tips
+### Configuration & Security Tips
 
 Do not commit secrets. Runtime credentials such as `GEMINI_API_KEY` should come
 from environment variables, while configuration stays in YAML files based on
